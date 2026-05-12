@@ -1,0 +1,26 @@
+[project]
+name = "courier"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "keyboard>=0.13.5",
+    "pyside6>=6.11.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "nuitka>=4.1",
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+pretty = true
+ignore_missing_imports = true

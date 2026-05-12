@@ -1,0 +1,15 @@
+# python
+__pycache__/
+.venv/
+.pytest_cache/
+.mypy_cache/
+dist/
+
+# ide
+.vscode/
+.eclipse/
+
+# repo
+data/
+logs/
+CLAUDE.md
