@@ -4,12 +4,13 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 dist/
+*.egg-info
 
 # ide
 .vscode/
 .eclipse/
 
 # repo
-data/
 logs/
+config/
 CLAUDE.md
