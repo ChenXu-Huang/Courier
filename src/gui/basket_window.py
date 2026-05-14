@@ -2,11 +2,18 @@
 
 import math
 from pathlib import Path
-from PySide6.QtCore import Qt, QMimeData, QRectF, QUrl
-from PySide6.QtGui import QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from ..utils import FileBasket
+from .._meta import ROOT_DIR
+from ..config import config_manager
+from ..logger import get_logger
+from ..utils import FileBasket, transfer
+
+logger = get_logger(__name__)
+
+_CLOSE_ICON_PATH = ROOT_DIR / "resources" / "icons" / "close.svg"
 
 _HEADER_RATIO = 0.15
 _FOOTER_RATIO = 0.15
@@ -16,11 +23,10 @@ _MAX_VISIBLE_FILES = 8
 class CourierBasketWindow(QWidget):
     """A square, always-on-top, frameless window for staging file transfers."""
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._config = config
         self._basket = FileBasket()
-        self._drag_start_pos = None
+        self._drag_start_pos: QPoint | None = None
         self._drag_out_started = False
         self._file_labels: list[QLabel] = []
 
@@ -34,7 +40,7 @@ class CourierBasketWindow(QWidget):
     # ------------------------------------------------------------------
 
     def _setup_window(self) -> None:
-        size = int(self._config.get("window_size", 320))
+        size = int(config_manager.get("window_size", 320))
         size = max(200, min(600, size))
 
         self.setFixedSize(size, size)
@@ -43,14 +49,16 @@ class CourierBasketWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setAcceptDrops(True)
+        logger.debug("Window created | size=%d", size)
 
     def _apply_theme(self) -> None:
         self._bg_color = QColor(30, 30, 40, 235)
-        self._radius = int(self._config.get("window_radius", 20))
+        self._radius = int(config_manager.get("window_radius", 20))
         self._border_color = QColor(255, 255, 255, 25)
 
-        opacity = float(self._config.get("window_opacity", 0.92))
+        opacity = float(config_manager.get("window_opacity", 0.92))
         self.setWindowOpacity(opacity)
+        logger.debug("Theme applied | radius=%d opacity=%.2f", self._radius, opacity)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -61,13 +69,12 @@ class CourierBasketWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # -- Header --
+        # -- Header (transparent — enables window drag) --
         self._header = QWidget()
         self._header.setFixedHeight(int(self.height() * _HEADER_RATIO))
         self._header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        hl = QVBoxLayout(self._header)
-        hl.setContentsMargins(20, 10, 20, 4)
-        hl.setSpacing(1)
+        hl = QHBoxLayout(self._header)
+        hl.setContentsMargins(20, 0, 44, 0)
 
         self._title_label = QLabel("Courier")
         tf = QFont()
@@ -82,8 +89,42 @@ class CourierBasketWindow(QWidget):
         self._info_label.setFont(inf)
         self._info_label.setStyleSheet("color: rgba(255,255,255,110);")
 
-        hl.addWidget(self._title_label)
-        hl.addWidget(self._info_label)
+        header_text_col = QVBoxLayout()
+        header_text_col.setContentsMargins(0, 10, 0, 4)
+        header_text_col.setSpacing(1)
+        header_text_col.addWidget(self._title_label)
+        header_text_col.addWidget(self._info_label)
+
+        hl.addLayout(header_text_col)
+        hl.addStretch()
+
+        # -- X close button (direct child of window, overlaid at top-right) --
+        close_icon = QIcon(str(_CLOSE_ICON_PATH))
+        close_icon.setIsMask(True)
+
+        self._title_close_btn = QPushButton(self)
+        self._title_close_btn.setIcon(close_icon)
+        self._title_close_btn.setIconSize(QSize(16, 16))
+        self._title_close_btn.setFlat(True)
+        self._title_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._title_close_btn.setFixedSize(28, 28)
+        self._title_close_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,30);
+                border: none;
+                border-radius: 14px;
+                color: rgba(255,255,255,200);
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,60);
+                color: rgba(255,255,255,255);
+            }
+        """)
+        self._title_close_btn.clicked.connect(self._minimize_to_tray)
+        btn_size = 28
+        margin = 8
+        self._title_close_btn.setGeometry(self.width() - btn_size - margin, margin, btn_size, btn_size)
+        self._title_close_btn.raise_()
 
         # -- File list --
         self._file_list = QWidget()
@@ -108,20 +149,14 @@ class CourierBasketWindow(QWidget):
         fl2 = QHBoxLayout(self._footer)
         fl2.setContentsMargins(16, 4, 16, 10)
 
-        btn_style = "QPushButton { color: rgba(255,255,255,140); font-size: 9pt; border: none; }QPushButton:hover { color: rgba(255,255,255,220); }"
+        btn_style = "QPushButton { color: rgba(255,255,255,140); font-size: 9pt; border: none; } QPushButton:hover { color: rgba(255,255,255,220); }"
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setFlat(True)
         self._clear_btn.setStyleSheet(btn_style)
         self._clear_btn.clicked.connect(self._on_clear)
 
-        self._close_btn = QPushButton("Close")
-        self._close_btn.setFlat(True)
-        self._close_btn.setStyleSheet(btn_style)
-        self._close_btn.clicked.connect(self._minimize_to_tray)
-
-        fl2.addWidget(self._clear_btn)
         fl2.addStretch()
-        fl2.addWidget(self._close_btn)
+        fl2.addWidget(self._clear_btn)
 
         # -- Assemble --
         layout.addWidget(self._header)
@@ -132,7 +167,7 @@ class CourierBasketWindow(QWidget):
     # Painting (rounded-rect background)
     # ------------------------------------------------------------------
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -148,15 +183,15 @@ class CourierBasketWindow(QWidget):
     # Drag-in (accept files from external)
     # ------------------------------------------------------------------
 
-    def dragEnterEvent(self, event) -> None:  # noqa: N802
+    def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dragMoveEvent(self, event) -> None:  # noqa: N802
+    def dragMoveEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event) -> None:  # noqa: N802
+    def dropEvent(self, event) -> None:
         paths: list[Path] = []
         for url in event.mimeData().urls():
             local = url.toLocalFile()
@@ -164,8 +199,11 @@ class CourierBasketWindow(QWidget):
                 paths.append(Path(local))
 
         if paths:
-            self._basket.add(paths)
+            added = self._basket.add(paths)
+            logger.info("Files dropped | added=%d total=%d size=%s", added, self._basket.count, self._format_size(self._basket.total_size))
             self._update_display()
+        else:
+            logger.warning("Drop event with no valid file URLs")
 
         event.acceptProposedAction()
 
@@ -173,12 +211,12 @@ class CourierBasketWindow(QWidget):
     # Drag-out (drag files to external target) & window move
     # ------------------------------------------------------------------
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.position().toPoint()
             self._drag_out_started = False
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._drag_start_pos is None or self._drag_out_started:
             return
 
@@ -198,7 +236,7 @@ class CourierBasketWindow(QWidget):
             self._drag_out_started = True
             self._start_drag_out()
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_start_pos = None
         self._drag_out_started = False
 
@@ -206,19 +244,57 @@ class CourierBasketWindow(QWidget):
         """Initiate QDrag with all staged file URLs."""
         self._drag_start_pos = None  # prevent re-entry
 
+        stale_files = self._basket.validate()
+        for p in stale_files:
+            self._basket.remove(p)
+
+        if self._basket.is_empty:
+            logger.warning("All files stale, drag-out cancelled")
+            self._update_display()
+            return
+
+        valid_files = list(self._basket.files)
+
+        is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+        is_move = (config_manager.get("default_transfer_mode", "copy") == "move") != is_shift
+        expected_action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
+
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(str(p)) for p in self._basket.files])
+        mime.setUrls([QUrl.fromLocalFile(str(p)) for p in valid_files])
         drag.setMimeData(mime)
+        result = drag.exec(expected_action)
 
-        drag.exec(Qt.DropAction.CopyAction)
+        files_still_at_source = [p for p in valid_files if p.exists()]
+        same_folder = (result == Qt.DropAction.MoveAction and len(files_still_at_source) == len(valid_files))
 
-        # Post-drop behaviour
-        action = self._config.get("after_drop_action", "close")
+        if same_folder:
+            logger.info("Same-folder drop detected, basket unchanged")
+            return
+
+        # Filesystem cleanup: in move mode, delete files the receiver didn't remove
+        if result == Qt.DropAction.MoveAction:
+            files_moved_away = [p for p in valid_files if not p.exists()]
+            if files_moved_away:
+                transfer.delete_sources(files_moved_away)
+                logger.info("Sources cleaned up after move | count=%d", len(files_moved_away))
+
+        if stale_files:
+            names = "\n".join(p.name for p in stale_files[:5])
+            QMessageBox.warning(self, "Files Missing", f"Skipped missing files:\n{names}")
+
+        # Basket state: determined solely by after_drop_action
+        action = config_manager.get("after_drop_action", "close")
         if action == "close":
             self.close()
         elif action == "clear":
             self._basket.clear()
+            self._update_display()
+        else:  # keep
+            if result == Qt.DropAction.MoveAction:
+                for p in valid_files:
+                    if not p.exists():
+                        self._basket.remove(p)
             self._update_display()
 
     # ------------------------------------------------------------------
@@ -270,7 +346,9 @@ class CourierBasketWindow(QWidget):
     # ------------------------------------------------------------------
 
     def _on_clear(self) -> None:
+        count = self._basket.count
         self._basket.clear()
+        logger.info("Basket cleared | removed=%d", count)
         self._update_display()
 
     def _minimize_to_tray(self) -> None:
@@ -280,7 +358,9 @@ class CourierBasketWindow(QWidget):
     def closeEvent(self, event) -> None:
         app = QApplication.instance()
         if isinstance(app, QApplication) and app.property("_quitting"):
+            logger.debug("Window closed during quit")
             event.accept()
         else:
+            logger.debug("Window minimized to tray")
             event.ignore()
             self.hide()

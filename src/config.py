@@ -1,30 +1,43 @@
+__all__ = ["config_manager"]
+
 import json
 from pathlib import Path
 from typing import Any, Callable
 
+from ._meta import ROOT_DIR
 from .logger import get_logger, log_exceptions
 
 logger = get_logger(__name__)
+
+_DEFAULT_CONFIG: dict[str, Any] = {
+    "window_size": 320,
+    "window_opacity": 0.92,
+    "window_radius": 20,
+    "theme_color": "#3B82F6",
+    "after_drop_action": "close",
+    "default_transfer_mode": "copy",
+    "global_hotkey": "shift+caps lock",
+}
 
 
 class _MISSING:
     """Sentinel for absent values (avoids ambiguity with ``None``)."""
 
 
-class JsonConfig:
+class JsonConfigManager:
     """Generic JSON-backed config store with nested key-path access.
 
     Features in-memory caching, lazy loading, auto-save, change callbacks,
     and context-manager batching.
 
     Examples:
-    >>> cfg = JsonConfig("config.json")
-        cfg.get("database.host", "localhost")
-        cfg.set("database.port", 5432)
-        cfg["database"] = {"host": "pg.example.com"}
-        with cfg:
-            cfg.set("a", 1)
-            cfg.set("b", 2)   # single disk write on exit
+    >>> config_manager = JsonConfigManager("config.json")
+        config_manager.get("database.host", "localhost")
+        config_manager.set("database.port", 5432)
+        config_manager["database"] = {"host": "pg.example.com"}
+        with config_manager:
+            config_manager.set("a", 1)
+            config_manager.set("b", 2)   # single disk write on exit
     """
 
     def __init__(
@@ -130,6 +143,7 @@ class JsonConfig:
         self._dirty = True
         self._fire_callbacks(path, old, value)
         self._flush()
+        logger.debug("Config set | %s = %r", path, value)
 
     def delete(self, path: str) -> bool:
         """Delete the key at *path*. Returns True if the key existed."""
@@ -140,6 +154,7 @@ class JsonConfig:
             self._dirty = True
             self._fire_callbacks(path, old, _MISSING)
             self._flush()
+            logger.debug("Config deleted | %s", path)
         return deleted
 
     def reload(self) -> None:
@@ -147,6 +162,7 @@ class JsonConfig:
         self._data = self._load_json()
         self._original = json.loads(json.dumps(self._data))
         self._dirty = False
+        logger.info("Config reloaded from %s", self.config_path)
 
     def save(self) -> None:
         """Force an immediate write to disk."""
@@ -224,3 +240,6 @@ class JsonConfig:
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({str(self.config_path)!r})"
+
+
+config_manager = JsonConfigManager(ROOT_DIR / "config" / "settings.json", default=_DEFAULT_CONFIG)

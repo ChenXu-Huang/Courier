@@ -1,5 +1,9 @@
 from pathlib import Path
 
+from ..logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class FileBasket:
     """Staged file path list — dedup, stats, validation."""
@@ -17,6 +21,8 @@ class FileBasket:
                 self._files.append(resolved)
                 self._paths.add(resolved)
                 added += 1
+        if added != len(paths):
+            logger.debug("Basket add | requested=%d added=%d duplicates=%d", len(paths), added, len(paths) - added)
         return added
 
     def remove(self, path: Path) -> bool:
@@ -25,11 +31,13 @@ class FileBasket:
             return False
         self._files = [p for p in self._files if p != resolved]
         self._paths.discard(resolved)
+        logger.debug("Basket remove | path=%s", resolved)
         return True
 
     def clear(self) -> None:
         self._files.clear()
         self._paths.clear()
+        logger.debug("Basket cleared")
 
     @property
     def files(self) -> list[Path]:
@@ -60,7 +68,10 @@ class FileBasket:
 
     def validate(self) -> list[Path]:
         """Return paths that no longer exist on disk."""
-        return [p for p in self._files if not p.exists()]
+        stale = [p for p in self._files if not p.exists()]
+        if stale:
+            logger.warning("Stale files detected | count=%d", len(stale))
+        return stale
 
     @property
     def duplicate_names(self) -> set[str]:

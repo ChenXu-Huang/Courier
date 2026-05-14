@@ -1,4 +1,4 @@
-from src import ROOT_DIR, VERSION
+from src._meta import ROOT_DIR, VERSION
 from src.logger import LoggerManager
 
 LoggerManager.configure(
