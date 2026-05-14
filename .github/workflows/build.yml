@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Extract version
+        id: vars
+        shell: bash
+        run: echo "CLEAN_VERSION=$(build/extract-version.sh "${GITHUB_REF_NAME}")" >> "$GITHUB_ENV"
+
+      - name: Build with Nuitka
+        run: >
+          uv run nuitka
+          --standalone
+          --disable-console
+          --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --include-data-dir=resources=resources
+          --output-dir=dist
+          --output-filename=Courier
+          --product-name=Courier
+          --file-version=${{ env.CLEAN_VERSION }}
+          main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Courier-${{ matrix.os }}-${{ github.ref_name }}
+          path: dist/main.dist/
