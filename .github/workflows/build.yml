@@ -35,12 +35,14 @@ jobs:
 
       - name: Restructure package
         shell: bash
-        run: ./build/restructure.sh Courier
+        run: ./build/restructure.sh
 
       - name: Package DMG (macOS only)
         if: runner.os == 'macOS'
         shell: bash
-        run: hdiutil create -volname "Courier" -srcfolder dist/Courier.app -ov -format UDZO dist/Courier.dmg
+        run: |
+          mv dist/main.app dist/Courier.app
+          hdiutil create -volname "Courier" -srcfolder dist/Courier.app -ov -format UDZO dist/Courier.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
