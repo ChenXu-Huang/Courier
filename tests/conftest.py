@@ -1,9 +1,9 @@
-from src._meta import ROOT_DIR, VERSION
+from src._meta import VERSION, LOG_DIR
 from src.logger import LoggerManager
 
 LoggerManager.configure(
     name="tests",
-    log_dir=ROOT_DIR / "logs",
+    log_dir=LOG_DIR,
     level="DEBUG",
     console=False,
     json_file=False,

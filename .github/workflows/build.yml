@@ -25,27 +25,25 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Extract version
-        id: vars
+      - name: Get metadata
         shell: bash
-        run: echo "CLEAN_VERSION=$(build/extract-version.sh "${GITHUB_REF_NAME}")" >> "$GITHUB_ENV"
+        run: ./build/metadata.sh "${{ github.ref_name }}" "${{ matrix.os }}" >> "$GITHUB_ENV"
 
       - name: Build with Nuitka
-        run: >
-          uv run nuitka
-          --standalone
-          --disable-console
-          --assume-yes-for-downloads
-          --enable-plugin=pyside6
-          --include-data-dir=resources=resources
-          --output-dir=dist
-          --output-filename=Courier
-          --product-name=Courier
-          --file-version=${{ env.CLEAN_VERSION }}
-          main.py
+        shell: bash
+        run: uv run nuitka --file-version=${{ env.CLEAN_VERSION }} main.py
+
+      - name: Restructure package
+        shell: bash
+        run: ./build/restructure.sh Courier
+
+      - name: Package DMG (macOS only)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: hdiutil create -volname "Courier" -srcfolder dist/Courier.app -ov -format UDZO dist/Courier.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Courier-${{ matrix.os }}-${{ github.ref_name }}
-          path: dist/main.dist/
+          name: Courier-${{ env.SHORT_OS }}-${{ github.ref_name }}
+          path: ${{ runner.os == 'macOS' && 'dist/Courier.dmg' || 'dist/main.dist/' }}

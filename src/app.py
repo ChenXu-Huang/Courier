@@ -2,13 +2,13 @@
 
 import sys
 
-from ._meta import ROOT_DIR, VERSION
+from ._meta import APP_NAME, VERSION, ROOT_DIR, LOG_DIR, RESOURCES_DIR
 from .logger import LoggerManager, LoggerConfig
 
 _LOG_CONFIG = LoggerConfig(
-    name="courier",
+    name=APP_NAME.lower(),
     level="INFO",
-    log_dir=ROOT_DIR / "logs",
+    log_dir=LOG_DIR,
     console=False,
     console_color=False,
     json_file=False,
@@ -24,7 +24,7 @@ logger = LoggerManager.get(__name__)
 
 
 def launch_gui() -> int:
-    from PySide6.QtGui import QCursor
+    from PySide6.QtGui import QCursor, QIcon
     from PySide6.QtWidgets import QApplication
 
     from .config import config_manager
@@ -33,8 +33,9 @@ def launch_gui() -> int:
 
     logger.info("Courier starting | version=%s | root=%s", VERSION, ROOT_DIR)
     app = QApplication(sys.argv)
-    app.setApplicationName("Courier")
-    app.setOrganizationName("Courier")
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(APP_NAME)
+    app.setWindowIcon(QIcon(str(RESOURCES_DIR / "icons" / "courier.svg")))
     app.setQuitOnLastWindowClosed(False)
 
     # --- Config ---

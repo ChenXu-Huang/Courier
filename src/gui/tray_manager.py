@@ -1,13 +1,16 @@
 """System tray icon and menu."""
 
-from PySide6.QtCore import QObject, QRect, Qt
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QObject
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
 from .basket_window import CourierBasketWindow
 from .settings_dialog import CourierSettingsDialog
+
+_ICON_PATH = RESOURCES_DIR / "icons" / "courier.svg"
 
 logger = get_logger(__name__)
 
@@ -56,26 +59,7 @@ class CourierTrayManager(QObject):
         logger.info("System tray initialized")
 
     def _make_icon(self) -> QIcon:
-        """Generate a simple coloured-circle tray icon."""
-        size = 64
-        pix = QPixmap(size, size)
-        pix.fill(Qt.GlobalColor.transparent)
-
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        color = QColor(config_manager.get("theme_color", "#3B82F6"))
-        p.setBrush(color)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(4, 4, 56, 56)
-
-        p.setPen(QPen(Qt.GlobalColor.white, 3))
-        f = QFont("Segoe UI", 28, QFont.Weight.Bold)
-        p.setFont(f)
-        p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "C")
-        p.end()
-
-        return QIcon(pix)
+        return QIcon(str(_ICON_PATH))
 
     # ------------------------------------------------------------------
     # Window lifecycle

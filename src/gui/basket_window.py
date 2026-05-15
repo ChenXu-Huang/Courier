@@ -6,14 +6,14 @@ from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from .._meta import ROOT_DIR
+from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
 from ..utils import FileBasket, transfer
 
 logger = get_logger(__name__)
 
-_CLOSE_ICON_PATH = ROOT_DIR / "resources" / "icons" / "close.svg"
+_CLOSE_ICON_PATH = RESOURCES_DIR / "icons" / "close.svg"
 
 _HEADER_RATIO = 0.15
 _FOOTER_RATIO = 0.15

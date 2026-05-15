@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from ._meta import ROOT_DIR
+from ._meta import CONFIG_DIR
 from .logger import get_logger, log_exceptions
 
 logger = get_logger(__name__)
@@ -242,4 +242,4 @@ class JsonConfigManager:
         return f"{type(self).__name__}({str(self.config_path)!r})"
 
 
-config_manager = JsonConfigManager(ROOT_DIR / "config" / "settings.json", default=_DEFAULT_CONFIG)
+config_manager = JsonConfigManager(CONFIG_DIR / "settings.json", default=_DEFAULT_CONFIG)
