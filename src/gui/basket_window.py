@@ -1,6 +1,7 @@
 """Square floating window — drag-drop file staging surface."""
 
 import math
+import sys
 from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
@@ -9,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMessageBox, QP
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
-from ..utils import FileBasket, transfer
+from ..utils import FileBasket
 from ..utils.i18n import tr, language_changed
 
 logger = get_logger(__name__)
@@ -37,10 +38,6 @@ class CourierBasketWindow(QWidget):
         self._update_display()
         language_changed.connect(self._retranslate_ui)
 
-    # ------------------------------------------------------------------
-    # Window setup
-    # ------------------------------------------------------------------
-
     def _setup_window(self) -> None:
         size = int(config_manager.get("window_size", 320))
         size = max(200, min(600, size))
@@ -62,9 +59,38 @@ class CourierBasketWindow(QWidget):
         self.setWindowOpacity(opacity)
         logger.debug("Theme applied | radius=%d opacity=%.2f", self._radius, opacity)
 
-    # ------------------------------------------------------------------
-    # UI construction
-    # ------------------------------------------------------------------
+    def _enforce_macos_topmost(self) -> bool:
+        """Use ctypes + Objective-C runtime to float above all apps.
+
+        Returns ``True`` on success, ``False`` if the NSWindow could not
+        be configured (so callers can decide whether to cache the result).
+        """
+        import ctypes
+        from ctypes import c_bool, c_char_p, c_long, c_void_p
+
+        try:
+            objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
+            objc.sel_registerName.restype = c_void_p
+            objc.sel_registerName.argtypes = [c_char_p]
+
+            msg = objc.objc_msgSend
+            msg_i = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_long)(msg)
+            msg_b = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_bool)(msg)
+
+            view = c_void_p(self.winId())
+            sel_window = objc.sel_registerName(b"window")
+            window = msg(view, sel_window)
+            if not window:
+                logger.warning("Failed to obtain NSWindow via ctypes")
+                return False
+
+            msg_i(window, objc.sel_registerName(b"setLevel:"), 3)
+            msg_b(window, objc.sel_registerName(b"setHidesOnDeactivate:"), False)
+            logger.debug("macOS topmost enforced via ctypes")
+            return True
+        except Exception as exc:
+            logger.warning("macOS topmost ctypes failed: %s", exc)
+            return False
 
     def _create_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -165,10 +191,6 @@ class CourierBasketWindow(QWidget):
         layout.addWidget(self._file_list, 1)
         layout.addWidget(self._footer)
 
-    # ------------------------------------------------------------------
-    # Painting (rounded-rect background)
-    # ------------------------------------------------------------------
-
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -184,6 +206,13 @@ class CourierBasketWindow(QWidget):
     # ------------------------------------------------------------------
     # Drag-in (accept files from external)
     # ------------------------------------------------------------------
+
+    # Show event (macOS topmost activation)
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if sys.platform == "darwin" and not getattr(self, "_macos_level_set", False):
+            if self._enforce_macos_topmost():
+                self._macos_level_set = True
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -255,7 +284,7 @@ class CourierBasketWindow(QWidget):
             self._update_display()
             return
 
-        valid_files = list(self._basket.files)
+        valid_files = self._basket.files
 
         is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
         is_move = (config_manager.get("default_transfer_mode", "copy") == "move") != is_shift
@@ -266,20 +295,6 @@ class CourierBasketWindow(QWidget):
         mime.setUrls([QUrl.fromLocalFile(str(p)) for p in valid_files])
         drag.setMimeData(mime)
         result = drag.exec(expected_action)
-
-        files_still_at_source = [p for p in valid_files if p.exists()]
-        same_folder = (result == Qt.DropAction.MoveAction and len(files_still_at_source) == len(valid_files))
-
-        if same_folder:
-            logger.info("Same-folder drop detected, basket unchanged")
-            return
-
-        # Filesystem cleanup: in move mode, delete files the receiver didn't remove
-        if result == Qt.DropAction.MoveAction:
-            files_moved_away = [p for p in valid_files if not p.exists()]
-            if files_moved_away:
-                transfer.delete_sources(files_moved_away)
-                logger.info("Sources cleaned up after move | count=%d", len(files_moved_away))
 
         if stale_files:
             names = "\n".join(p.name for p in stale_files[:5])
