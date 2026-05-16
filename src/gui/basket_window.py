@@ -60,7 +60,12 @@ class CourierBasketWindow(QWidget):
         logger.debug("Theme applied | radius=%d opacity=%.2f", self._radius, opacity)
 
     def _enforce_macos_topmost(self) -> bool:
-        """Use ctypes + Objective-C runtime to float above all apps.
+        """Float the window above all others via the Objective-C runtime.
+
+        Uses ``method_getImplementation`` to get plain C function pointers
+        (IMP) for each ObjC message, then calls them through
+        ``ctypes.CFUNCTYPE``.  This avoids ``objc_msgSend``, which is an
+        assembly trampoline whose ABI is incompatible with libffi on arm64.
 
         Returns ``True`` on success, ``False`` if the NSWindow could not
         be configured (so callers can decide whether to cache the result).
@@ -72,21 +77,39 @@ class CourierBasketWindow(QWidget):
             objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
             objc.sel_registerName.restype = c_void_p
             objc.sel_registerName.argtypes = [c_char_p]
+            objc.objc_getClass.restype = c_void_p
+            objc.objc_getClass.argtypes = [c_char_p]
+            objc.class_getInstanceMethod.restype = c_void_p
+            objc.class_getInstanceMethod.argtypes = [c_void_p, c_void_p]
+            objc.method_getImplementation.restype = c_void_p
+            objc.method_getImplementation.argtypes = [c_void_p]
 
-            msg = objc.objc_msgSend
-            msg_i = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_long)(msg)
-            msg_b = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_bool)(msg)
+            view = c_void_p(int(self.winId()))
+            ns_view_cls = objc.objc_getClass(b"NSView")
+            ns_window_cls = objc.objc_getClass(b"NSWindow")
 
-            view = c_void_p(self.winId())
+            # --- Get NSWindow from NSView using IMP (regular C func) ---
             sel_window = objc.sel_registerName(b"window")
-            window = msg(view, sel_window)
-            if not window:
+            imp_window = objc.method_getImplementation(objc.class_getInstanceMethod(ns_view_cls, sel_window))
+            get_window = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p)(imp_window)
+            ns_window = get_window(view, sel_window)
+            if not ns_window:
                 logger.warning("Failed to obtain NSWindow via ctypes")
                 return False
 
-            msg_i(window, objc.sel_registerName(b"setLevel:"), 3)
-            msg_b(window, objc.sel_registerName(b"setHidesOnDeactivate:"), False)
-            logger.debug("macOS topmost enforced via ctypes")
+            # --- setLevel: via IMP ---
+            sel_level = objc.sel_registerName(b"setLevel:")
+            imp_level = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_level))
+            set_level = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_long)(imp_level)
+            set_level(ns_window, sel_level, 3)
+
+            # --- setHidesOnDeactivate: via IMP ---
+            sel_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
+            imp_hides = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_hides))
+            set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
+            set_hides(ns_window, sel_hides, False)
+
+            logger.debug("macOS topmost enforced via IMP (safe path)")
             return True
         except Exception as exc:
             logger.warning("macOS topmost ctypes failed: %s", exc)

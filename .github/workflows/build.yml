@@ -41,11 +41,21 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          mv dist/main.app dist/Courier.app
-          hdiutil create -volname "Courier" -srcfolder dist/Courier.app -ov -format UDZO dist/Courier.dmg
+          mv dist/main.app "dist/${{ github.event.repository.name }}.app"
+          brew install create-dmg
+          create-dmg \
+            --volname "${{ github.event.repository.name }}" \
+            --window-pos 200 120 \
+            --window-size 500 300 \
+            --icon-size 100 \
+            --icon "${{ github.event.repository.name }}.app" 150 150 \
+            --hide-extension "${{ github.event.repository.name }}.app" \
+            --app-drop-link 350 150 \
+            "dist/${{ github.event.repository.name }}.dmg" \
+            "dist/${{ github.event.repository.name }}.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Courier-${{ env.SHORT_OS }}-${{ github.ref_name }}
-          path: ${{ runner.os == 'macOS' && 'dist/Courier.dmg' || 'dist/main.dist/' }}
+          name: ${{ github.event.repository.name }}-${{ env.SHORT_OS }}-${{ github.ref_name }}
+          path: ${{ runner.os == 'macOS' && format('dist/{0}.dmg', github.event.repository.name) || 'dist/main.dist/' }}

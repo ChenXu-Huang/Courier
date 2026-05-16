@@ -24,10 +24,9 @@ class Hotkey:
         "cmd": Key.cmd, "command": Key.cmd, "win": Key.cmd, "super": Key.cmd, "meta": Key.cmd,
         "caps lock": Key.caps_lock, "esc": Key.esc, "escape": Key.esc,
         "space": Key.space, "enter": Key.enter, "tab": Key.tab, "backspace": Key.backspace,
-        "delete": Key.delete, "insert": Key.insert, "home": Key.home,
+        "delete": Key.delete, "home": Key.home,
         "end": Key.end, "page up": Key.page_up, "page down": Key.page_down,
         "up": Key.up, "down": Key.down, "left": Key.left, "right": Key.right,
-        "print screen": Key.print_screen, "menu": Key.menu, "pause": Key.pause,
     }  # fmt: skip
 
     _MODIFIERS: dict[Key, tuple[Key, ...]] = {
