@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import keyboard
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generic, TypeVar
 
 from PySide6.QtCore import Qt
@@ -14,21 +15,16 @@ from PySide6.QtWidgets import (
 
 from ..config import config_manager
 from ..logger import get_logger
+from ..utils.i18n import tr, available_languages, current_language, set_language
 
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Field descriptor
-# ---------------------------------------------------------------------------
-
 W = TypeVar("W", bound=QWidget)
 
 
 @dataclass(frozen=True)
 class FieldSpec(Generic[W]):
     """Describes one settings field: label, widget factory, getter/setter,
-    and optional validator.
+    and optional validator, and (for combo fields) i18n keys for each item.
     """
 
     key: str
@@ -37,6 +33,7 @@ class FieldSpec(Generic[W]):
     get: Callable[[W], Any]
     set: Callable[[W, Any], None]
     validate: Callable[[W], str | None] = lambda _: None
+    item_keys: tuple[str, ...] = field(default_factory=tuple)
 
     def with_validate(self, validator: Callable[[W], str | None]) -> FieldSpec[W]:
         """Return a new ``FieldSpec`` with a different validator."""
@@ -71,15 +68,18 @@ class FieldSpec(Generic[W]):
 
     @staticmethod
     def combo(key: str, label: str, *items: tuple[str, str]) -> FieldSpec[QComboBox]:
+        i18n_keys = tuple(i18n_key for i18n_key, _ in items)
+        data_values = [(i18n_key, data) for i18n_key, data in items]
         def make() -> QComboBox:
             w = QComboBox()
-            for text, data in items:
-                w.addItem(text, data)
+            for i18n_key, data in data_values:
+                w.addItem("", data)
             return w
         return FieldSpec(
             key=key, label=label, make=make,
             get=lambda w: w.currentData(),
             set=lambda w, v: w.setCurrentIndex(i if (i := w.findData(v)) >= 0 else 0),
+            item_keys=i18n_keys,
         )
 
     @staticmethod
@@ -96,37 +96,45 @@ class FieldSpec(Generic[W]):
         )
 
 
+def _validate_hotkey(w: QLineEdit) -> str | None:
+    raw = w.text().strip()
+    if not raw:
+        return tr("settings.validate_hotkey_empty")
+    try:
+        keyboard.parse_hotkey(raw)
+    except (ValueError, KeyError):
+        return tr("settings.validate_hotkey_invalid")
+    return None
+
+
 _FIELDS: list[FieldSpec[Any]] = [
-    FieldSpec.int_spin("window_size", "Window Size (px)", 200, 600, 10),
-    FieldSpec.float_spin("window_opacity", "Window Opacity", 0.1, 1.0, 0.05, 2),
-    FieldSpec.int_spin("window_radius", "Corner Radius (px)", 0, 50),
+    FieldSpec.int_spin("window_size", "settings.window_size", 200, 600, 10),
+    FieldSpec.float_spin("window_opacity", "settings.window_opacity", 0.1, 1.0, 0.05, 2),
+    FieldSpec.int_spin("window_radius", "settings.corner_radius", 0, 50),
     FieldSpec.combo(
-        "after_drop_action", "After Drop",
-        ("Close window", "close"),
-        ("Clear basket", "clear"),
-        ("Keep items", "keep"),
+        "after_drop_action", "settings.after_drop",
+        ("settings.after_drop.close", "close"),
+        ("settings.after_drop.clear", "clear"),
+        ("settings.after_drop.keep",  "keep"),
     ),
     FieldSpec.combo(
-        "default_transfer_mode", "Transfer Mode",
-        ("Copy", "copy"),
-        ("Move", "move"),
+        "default_transfer_mode", "settings.transfer_mode",
+        ("settings.transfer_mode.copy", "copy"),
+        ("settings.transfer_mode.move", "move"),
     ),
-    FieldSpec.text("global_hotkey", "Global Hotkey",
-        placeholder="e.g. ctrl+shift+caps lock",
-    ).with_validate(lambda w: "The hotkey cannot be empty" if not w.text().strip() else None),
+    FieldSpec.text(
+        "global_hotkey", "settings.global_hotkey",
+        placeholder="",
+    ).with_validate(_validate_hotkey),
 ]
 
-
-# ---------------------------------------------------------------------------
-# Dialog
-# ---------------------------------------------------------------------------
 
 class CourierSettingsDialog(QDialog):
     """Modal settings dialog."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Courier Settings")
+        self.setWindowTitle(tr("settings.title"))
         self.setMinimumWidth(360)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self._build_ui()
@@ -141,19 +149,37 @@ class CourierSettingsDialog(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setContentsMargins(0, 0, 0, 0)
 
-        self._widgets = {spec.key: (spec, spec.make()) for spec in _FIELDS}
+        self._widgets: dict[str, tuple[FieldSpec[Any], QWidget]] = {
+            spec.key: (spec, spec.make()) for spec in _FIELDS
+        }
         for spec, widget in self._widgets.values():
-            form.addRow(f"{spec.label}:", widget)
+            form.addRow(f"{tr(spec.label)}:", widget)
+            self._apply_combo_translations(spec, widget)
+            if isinstance(widget, QLineEdit) and spec.key == "global_hotkey":
+                widget.setPlaceholderText(tr("settings.hotkey_placeholder"))
 
         layout.addLayout(form)
+
+        # Language selection
+        self._lang_combo = QComboBox()
+        for locale, name in available_languages():
+            self._lang_combo.addItem(name, locale)
+        self._lang_combo.setCurrentIndex(self._lang_combo.findData(current_language()))
+        form.addRow(f"{tr('settings.language')}:", self._lang_combo)
+
         layout.addSpacing(12)
 
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btn_box.accepted.connect(self._on_accept)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
+
+    @staticmethod
+    def _apply_combo_translations(spec: FieldSpec[Any], widget: QWidget) -> None:
+        if not isinstance(widget, QComboBox) or not spec.item_keys:
+            return
+        for i, key in enumerate(spec.item_keys):
+            widget.setItemText(i, tr(key))
 
     def _load_values(self) -> None:
         for spec, widget in self._widgets.values():
@@ -161,15 +187,20 @@ class CourierSettingsDialog(QDialog):
 
     def _on_accept(self) -> None:
         errors = [
-            f"{spec.label}: {msg}"
+            f"{tr(spec.label)}: {msg}"
             for spec, widget in self._widgets.values()
             if (msg := spec.validate(widget)) is not None
         ]
         if errors:
-            QMessageBox.warning(self, "Invalid Settings", "\n".join(errors))
+            QMessageBox.warning(self, tr("settings.invalid_title"), "\n".join(errors))
             return
 
         for spec, widget in self._widgets.values():
             config_manager.set(spec.key, spec.get(widget))
         logger.info("Settings saved")
+
+        new_lang = self._lang_combo.currentData()
+        if new_lang != current_language():
+            set_language(new_lang)
+
         self.accept()

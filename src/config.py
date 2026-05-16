@@ -10,10 +10,10 @@ from .logger import get_logger, log_exceptions
 logger = get_logger(__name__)
 
 _DEFAULT_CONFIG: dict[str, Any] = {
+    "language": "zh_CN",
     "window_size": 320,
     "window_opacity": 0.92,
     "window_radius": 20,
-    "theme_color": "#3B82F6",
     "after_drop_action": "close",
     "default_transfer_mode": "copy",
     "global_hotkey": "shift+caps lock",

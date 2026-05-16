@@ -10,6 +10,7 @@ from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
 from ..utils import FileBasket, transfer
+from ..utils.i18n import tr, language_changed
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ class CourierBasketWindow(QWidget):
         self._create_ui()
         self._apply_theme()
         self._update_display()
+        language_changed.connect(self._retranslate_ui)
 
     # ------------------------------------------------------------------
     # Window setup
@@ -76,7 +78,7 @@ class CourierBasketWindow(QWidget):
         hl = QHBoxLayout(self._header)
         hl.setContentsMargins(20, 0, 44, 0)
 
-        self._title_label = QLabel("Courier")
+        self._title_label = QLabel(tr("app.name"))
         tf = QFont()
         tf.setPointSize(11)
         tf.setBold(True)
@@ -135,7 +137,7 @@ class CourierBasketWindow(QWidget):
         self._fl_layout.setSpacing(3)
         self._fl_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._empty_label = QLabel("Drop files here")
+        self._empty_label = QLabel(tr("basket.empty_hint"))
         ef = QFont()
         ef.setPointSize(10)
         self._empty_label.setFont(ef)
@@ -150,7 +152,7 @@ class CourierBasketWindow(QWidget):
         fl2.setContentsMargins(16, 4, 16, 10)
 
         btn_style = "QPushButton { color: rgba(255,255,255,140); font-size: 9pt; border: none; } QPushButton:hover { color: rgba(255,255,255,220); }"
-        self._clear_btn = QPushButton("Clear")
+        self._clear_btn = QPushButton(tr("basket.clear"))
         self._clear_btn.setFlat(True)
         self._clear_btn.setStyleSheet(btn_style)
         self._clear_btn.clicked.connect(self._on_clear)
@@ -281,7 +283,7 @@ class CourierBasketWindow(QWidget):
 
         if stale_files:
             names = "\n".join(p.name for p in stale_files[:5])
-            QMessageBox.warning(self, "Files Missing", f"Skipped missing files:\n{names}")
+            QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
 
         # Basket state: determined solely by after_drop_action
         action = config_manager.get("after_drop_action", "close")
@@ -301,6 +303,12 @@ class CourierBasketWindow(QWidget):
     # Display helpers
     # ------------------------------------------------------------------
 
+    def _retranslate_ui(self) -> None:
+        self._title_label.setText(tr("app.name"))
+        self._empty_label.setText(tr("basket.empty_hint"))
+        self._clear_btn.setText(tr("basket.clear"))
+        self._update_display()
+
     def _update_display(self) -> None:
         for lb in self._file_labels:
             lb.deleteLater()
@@ -316,7 +324,7 @@ class CourierBasketWindow(QWidget):
         self._clear_btn.setVisible(True)
 
         cnt = self._basket.count
-        self._info_label.setText(f"{cnt} items · {self._format_size(self._basket.total_size)}")
+        self._info_label.setText(tr("info.items", count=cnt, size=self._format_size(self._basket.total_size)))
 
         remaining = self._basket.count - _MAX_VISIBLE_FILES
 
@@ -328,7 +336,7 @@ class CourierBasketWindow(QWidget):
             self._file_labels.append(lb)
 
         if remaining > 0:
-            more = QLabel(f"+{remaining} more...")
+            more = QLabel(tr("basket.more", count=remaining))
             more.setStyleSheet("color: rgba(255,255,255,100); font-size: 9pt;")
             self._fl_layout.addWidget(more)
             self._file_labels.append(more)

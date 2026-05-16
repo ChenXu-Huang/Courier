@@ -1,0 +1,34 @@
+{
+  "app.name": "Courier",
+
+  "basket.empty_hint": "拖拽文件到此",
+  "basket.clear": "清空",
+  "basket.more": "还有 {count} 个...",
+  "basket.files_missing": "已跳过不存在的文件：\n{names}",
+
+  "tray.new_window": "新建窗口",
+  "tray.settings": "设置",
+  "tray.quit": "退出",
+
+  "settings.title": "Courier 设置",
+  "settings.window_size": "窗口大小（像素）",
+  "settings.window_opacity": "窗口透明度",
+  "settings.corner_radius": "圆角半径（像素）",
+  "settings.after_drop": "拖放后",
+  "settings.after_drop.close": "关闭窗口",
+  "settings.after_drop.clear": "清空篮子",
+  "settings.after_drop.keep": "保留文件",
+  "settings.transfer_mode": "传输模式",
+  "settings.transfer_mode.copy": "复制",
+  "settings.transfer_mode.move": "移动",
+  "settings.global_hotkey": "全局快捷键",
+  "settings.hotkey_placeholder": "例如 ctrl+shift+caps lock",
+  "settings.language": "语言",
+  "settings.invalid_title": "无效设置",
+  "settings.validate_hotkey_empty": "快捷键不能为空",
+
+  "lang.zh_CN": "中文",
+  "lang.en_US": "英文",
+
+  "info.items": "{count} 项 · {size}"
+}

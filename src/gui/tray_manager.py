@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
+from ..utils.i18n import tr, language_changed
 from .basket_window import CourierBasketWindow
 from .settings_dialog import CourierSettingsDialog
 
@@ -22,6 +23,7 @@ class CourierTrayManager(QObject):
         super().__init__()
         self._windows: list[CourierBasketWindow] = []
         self._setup_tray()
+        language_changed.connect(self._retranslate_tray)
 
     # ------------------------------------------------------------------
     # Tray setup
@@ -35,20 +37,20 @@ class CourierTrayManager(QObject):
         # Context menu
         menu = QMenu()
 
-        new_act = QAction("New Window", self)
-        new_act.triggered.connect(self.create_new_window)
+        self._new_act = QAction(tr("tray.new_window"), self)
+        self._new_act.triggered.connect(self.create_new_window)
 
-        settings_act = QAction("Settings", self)
-        settings_act.triggered.connect(self._open_settings)
+        self._settings_act = QAction(tr("tray.settings"), self)
+        self._settings_act.triggered.connect(self._open_settings)
 
-        quit_act = QAction("Quit", self)
-        quit_act.triggered.connect(self.quit)
+        self._quit_act = QAction(tr("tray.quit"), self)
+        self._quit_act.triggered.connect(self.quit)
 
-        menu.addAction(new_act)
+        menu.addAction(self._new_act)
         menu.addSeparator()
-        menu.addAction(settings_act)
+        menu.addAction(self._settings_act)
         menu.addSeparator()
-        menu.addAction(quit_act)
+        menu.addAction(self._quit_act)
 
         self._tray.setContextMenu(menu)
 
@@ -92,6 +94,12 @@ class CourierTrayManager(QObject):
         w.destroyed.connect(lambda: self._windows.remove(w) if w in self._windows else None)
         self._windows.append(w)
         return w
+
+    def _retranslate_tray(self) -> None:
+        self._new_act.setText(tr("tray.new_window"))
+        self._settings_act.setText(tr("tray.settings"))
+        self._quit_act.setText(tr("tray.quit"))
+        self._tray.setToolTip(tr("app.name"))
 
     def close_all_windows(self) -> None:
         for w in list(self._windows):

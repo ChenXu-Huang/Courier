@@ -1,0 +1,34 @@
+{
+  "app.name": "Courier",
+
+  "basket.empty_hint": "Drop files here",
+  "basket.clear": "Clear",
+  "basket.more": "+{count} more...",
+  "basket.files_missing": "Skipped missing files:\n{names}",
+
+  "tray.new_window": "New Window",
+  "tray.settings": "Settings",
+  "tray.quit": "Quit",
+
+  "settings.title": "Courier Settings",
+  "settings.window_size": "Window Size (px)",
+  "settings.window_opacity": "Window Opacity",
+  "settings.corner_radius": "Corner Radius (px)",
+  "settings.after_drop": "After Drop",
+  "settings.after_drop.close": "Close window",
+  "settings.after_drop.clear": "Clear basket",
+  "settings.after_drop.keep": "Keep items",
+  "settings.transfer_mode": "Transfer Mode",
+  "settings.transfer_mode.copy": "Copy",
+  "settings.transfer_mode.move": "Move",
+  "settings.global_hotkey": "Global Hotkey",
+  "settings.hotkey_placeholder": "e.g. ctrl+shift+caps lock",
+  "settings.language": "Language",
+  "settings.invalid_title": "Invalid Settings",
+  "settings.validate_hotkey_empty": "The hotkey cannot be empty",
+
+  "lang.zh_CN": "Chinese",
+  "lang.en_US": "English",
+
+  "info.items": "{count} items · {size}"
+}
