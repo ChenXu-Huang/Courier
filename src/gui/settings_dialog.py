@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import keyboard
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Generic, TypeVar
 
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from ..config import config_manager
 from ..logger import get_logger
+from ..utils.hotkey_manager import Hotkey
 from ..utils.i18n import tr, available_languages, current_language, set_language
 
 logger = get_logger(__name__)
@@ -100,9 +100,7 @@ def _validate_hotkey(w: QLineEdit) -> str | None:
     raw = w.text().strip()
     if not raw:
         return tr("settings.validate_hotkey_empty")
-    try:
-        keyboard.parse_hotkey(raw)
-    except (ValueError, KeyError):
+    if not Hotkey.validate(raw):
         return tr("settings.validate_hotkey_invalid")
     return None
 

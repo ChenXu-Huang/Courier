@@ -5,7 +5,7 @@ description = "A lightweight cross-platform file staging tool with PySide6 GUI"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "keyboard>=0.13.5",
+    "pynput>=1.8.2",
     "pyside6>=6.11.0",
 ]
 

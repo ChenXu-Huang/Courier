@@ -33,7 +33,12 @@ def _resolve_root() -> Path:
 
 
 ROOT_DIR = _resolve_root()
-RESOURCES_DIR = ROOT_DIR / ("Resources" if sys.platform == "darwin" else "resources")
+
+
+def _get_resources_dir() -> Path:
+    if sys.platform == "darwin" and _is_bundled():
+        return ROOT_DIR / "Resources"
+    return ROOT_DIR / "resources"
 
 
 def _get_config_dir() -> Path:
@@ -58,5 +63,6 @@ def _get_log_dir() -> Path:
     return Path(xdg_data) / APP_NAME / "logs" if xdg_data else Path.home() / ".local" / "share" / APP_NAME / "logs"
 
 
+RESOURCES_DIR = _get_resources_dir()
 CONFIG_DIR = _get_config_dir()
 LOG_DIR = _get_log_dir()
