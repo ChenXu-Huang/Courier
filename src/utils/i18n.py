@@ -1,37 +1,42 @@
 import json
 import os
-from PySide6.QtCore import QObject, Signal
+import sys
+import plistlib
+from PySide6.QtCore import QObject, Signal, QLocale
 
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
 
 _LANG_DIR = RESOURCES_DIR / "lang"
+_MAC_PLIST_PATH = "~/Library/Preferences/.GlobalPreferences.plist"
 
 
-class I18n(QObject):
-    """Global i18n state & signal bus."""
-
+class _SignalBus(QObject):
     changed = Signal(str)
 
+
+class I18n:
+    """Global i18n state & signal bus."""
+
     def __init__(self) -> None:
-        super().__init__()
+        self._bus = _SignalBus()
+        self.changed = self._bus.changed
         self._strings = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in _LANG_DIR.iterdir() if p.is_file() and p.suffix == ".json"}
         self._system = self._detect()
         self._current = config_manager.get("language", "auto")
 
     def _detect(self) -> str:
-        """Detect system locale from env; skip C/POSIX."""
-        for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
-            val = os.environ.get(var, "")
-            if not val:
-                continue
-            base = val.split(".")[0]
-            if base == "C":  # 同时拦住 C、C.UTF-8 等
-                continue
-            loc = base.replace("-", "_")
+        """Detect system locale. macOS plist first, then QLocale."""
+        if sys.platform == "darwin":
+            path = os.path.expanduser(_MAC_PLIST_PATH)
+            with open(path, "rb") as f:
+                plist = plistlib.load(f)
+            loc = plist.get("AppleLocale", "").replace("-", "_")
             if loc in self._strings:
                 return loc
-        return "en_US"
+
+        loc = QLocale.system().name().replace("-", "_")
+        return loc if loc in self._strings else "en_US"
 
     def _effective(self, raw: str) -> str:
         return self._system if raw == "auto" else raw
@@ -49,14 +54,12 @@ class I18n(QObject):
 
     def tr(self, key: str, **kwargs) -> str:
         loc = self._effective(self._current)
-        # 用 None 判断替代 or，避免空字符串误 fallback
         text = self._strings.get(loc, {}).get(key)
         if text is None:
             text = self._strings.get("en_US", {}).get(key, key)
         return text.format_map(kwargs) if kwargs else text
 
     def available(self) -> list[tuple[str, str]]:
-        # 保留你想要的顺序，但自动包含 lang/ 目录里新增的其他语言
         preferred = [k for k in ("zh_CN", "en_US", "ja_JP") if k in self._strings]
         other = sorted(k for k in self._strings if k not in preferred)
         keys = ["auto"] + preferred + other
