@@ -5,6 +5,7 @@
   "basket.clear": "Clear",
   "basket.more": "+{count} more...",
   "basket.files_missing": "Skipped missing files:\n{names}",
+  "basket.compress": "Compress on drag",
 
   "tray.new_window": "New Window",
   "tray.settings": "Settings",
@@ -22,11 +23,13 @@
   "settings.transfer_mode.copy": "Copy",
   "settings.transfer_mode.move": "Move",
   "settings.global_hotkey": "Global Hotkey",
-  "settings.hotkey_placeholder": "e.g. ctrl+shift+caps lock",
+  "settings.hotkey_placeholder": "avoid caps lock on macOS",
+  "settings.show_on_startup": "Show window on startup",
   "settings.language": "Language",
   "settings.invalid_title": "Invalid Settings",
   "settings.validate_hotkey_empty": "The hotkey cannot be empty",
 
+  "lang.auto": "Auto",
   "lang.zh_CN": "Chinese",
   "lang.en_US": "English",
 

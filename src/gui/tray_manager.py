@@ -1,6 +1,6 @@
 """System tray icon and menu."""
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -18,6 +18,9 @@ logger = get_logger(__name__)
 
 class CourierTrayManager(QObject):
     """Owns the system tray icon and manages window instances."""
+
+    settings_about_to_open = Signal()
+    settings_closed = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -113,8 +116,10 @@ class CourierTrayManager(QObject):
 
     def _open_settings(self) -> None:
         logger.info("Settings dialog opened")
+        self.settings_about_to_open.emit()
         dialog = CourierSettingsDialog(None)
         dialog.exec()
+        self.settings_closed.emit()
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

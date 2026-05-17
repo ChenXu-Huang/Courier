@@ -1,21 +1,26 @@
 """Square floating window — drag-drop file staging surface."""
 
 import math
+import os
 import sys
+import tempfile
+import uuid
+import zipfile
 from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
-from ..logger import get_logger
+from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket
 from ..utils.i18n import tr, language_changed
 
 logger = get_logger(__name__)
 
 _CLOSE_ICON_PATH = RESOURCES_DIR / "icons" / "close.svg"
+_MENU_ICON_PATH = RESOURCES_DIR / "icons" / "menu.svg"
 
 _HEADER_RATIO = 0.15
 _FOOTER_RATIO = 0.15
@@ -27,10 +32,13 @@ class CourierBasketWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._trace_id = uuid.uuid4().hex[:6]
+        set_trace_id(self._trace_id)
         self._basket = FileBasket()
         self._drag_start_pos: QPoint | None = None
         self._drag_out_started = False
         self._file_labels: list[QLabel] = []
+        self._temp_zip: Path | None = None
 
         self._setup_window()
         self._create_ui()
@@ -125,7 +133,8 @@ class CourierBasketWindow(QWidget):
         self._header.setFixedHeight(int(self.height() * _HEADER_RATIO))
         self._header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         hl = QHBoxLayout(self._header)
-        hl.setContentsMargins(20, 0, 44, 0)
+        hl.setContentsMargins(44, 0, 44, 0)
+        hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._title_label = QLabel(tr("app.name"))
         tf = QFont()
@@ -147,7 +156,6 @@ class CourierBasketWindow(QWidget):
         header_text_col.addWidget(self._info_label)
 
         hl.addLayout(header_text_col)
-        hl.addStretch()
 
         # -- X close button (direct child of window, overlaid at top-right) --
         close_icon = QIcon(str(_CLOSE_ICON_PATH))
@@ -171,11 +179,37 @@ class CourierBasketWindow(QWidget):
                 color: rgba(255,255,255,255);
             }
         """)
-        self._title_close_btn.clicked.connect(self._minimize_to_tray)
+        self._title_close_btn.clicked.connect(self.close)
         btn_size = 28
         margin = 8
         self._title_close_btn.setGeometry(self.width() - btn_size - margin, margin, btn_size, btn_size)
         self._title_close_btn.raise_()
+
+        # -- Menu button (top-left) --
+        menu_icon = QIcon(str(_MENU_ICON_PATH))
+        menu_icon.setIsMask(True)
+
+        btn_style_menu = """
+            QPushButton {
+                background: rgba(255,255,255,30);
+                border: none;
+                border-radius: 14px;
+                color: rgba(255,255,255,200);
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,60);
+                color: rgba(255,255,255,255);
+            }
+        """
+        self._menu_btn = QPushButton(self)
+        self._menu_btn.setIcon(menu_icon)
+        self._menu_btn.setIconSize(QSize(16, 16))
+        self._menu_btn.setFlat(True)
+        self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._menu_btn.setFixedSize(btn_size, btn_size)
+        self._menu_btn.setStyleSheet(btn_style_menu)
+        self._menu_btn.setGeometry(margin, margin, btn_size, btn_size)
+        self._menu_btn.clicked.connect(self._show_menu)
 
         # -- File list --
         self._file_list = QWidget()
@@ -197,17 +231,6 @@ class CourierBasketWindow(QWidget):
         # -- Footer --
         self._footer = QWidget()
         self._footer.setFixedHeight(int(self.height() * _FOOTER_RATIO))
-        fl2 = QHBoxLayout(self._footer)
-        fl2.setContentsMargins(16, 4, 16, 10)
-
-        btn_style = "QPushButton { color: rgba(255,255,255,140); font-size: 9pt; border: none; } QPushButton:hover { color: rgba(255,255,255,220); }"
-        self._clear_btn = QPushButton(tr("basket.clear"))
-        self._clear_btn.setFlat(True)
-        self._clear_btn.setStyleSheet(btn_style)
-        self._clear_btn.clicked.connect(self._on_clear)
-
-        fl2.addStretch()
-        fl2.addWidget(self._clear_btn)
 
         # -- Assemble --
         layout.addWidget(self._header)
@@ -246,6 +269,7 @@ class CourierBasketWindow(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
+        set_trace_id(self._trace_id)
         paths: list[Path] = []
         for url in event.mimeData().urls():
             local = url.toLocalFile()
@@ -254,7 +278,9 @@ class CourierBasketWindow(QWidget):
 
         if paths:
             added = self._basket.add(paths)
-            logger.info("Files dropped | added=%d total=%d size=%s", added, self._basket.count, self._format_size(self._basket.total_size))
+            paths_str = ", ".join(str(p) for p in paths)
+            logger.info("Files dropped | added=%d paths=[%s] total=%d size=%s",
+                        added, paths_str, self._basket.count, self._format_size(self._basket.total_size))
             self._update_display()
         else:
             logger.warning("Drop event with no valid file URLs")
@@ -296,6 +322,7 @@ class CourierBasketWindow(QWidget):
 
     def _start_drag_out(self) -> None:
         """Initiate QDrag with all staged file URLs."""
+        set_trace_id(self._trace_id)
         self._drag_start_pos = None  # prevent re-entry
 
         stale_files = self._basket.validate()
@@ -309,33 +336,62 @@ class CourierBasketWindow(QWidget):
 
         valid_files = self._basket.files
 
-        is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
-        is_move = (config_manager.get("default_transfer_mode", "copy") == "move") != is_shift
-        expected_action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
+        compress = config_manager.get("compress_on_drag", False)
 
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(str(p)) for p in valid_files])
-        drag.setMimeData(mime)
-        result = drag.exec(expected_action)
+        if compress:
+            zip_path = self._create_temp_zip(valid_files)
+            if zip_path is None:
+                logger.warning("Compression failed, drag-out cancelled")
+                return
+            self._temp_zip = zip_path
 
-        if stale_files:
-            names = "\n".join(p.name for p in stale_files[:5])
-            QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+            drag = QDrag(self)
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(zip_path))])
+            drag.setMimeData(mime)
+            result = drag.exec(Qt.DropAction.CopyAction)
 
-        # Basket state: determined solely by after_drop_action
-        action = config_manager.get("after_drop_action", "close")
-        if action == "close":
-            self.close()
-        elif action == "clear":
-            self._basket.clear()
-            self._update_display()
-        else:  # keep
-            if result == Qt.DropAction.MoveAction:
-                for p in valid_files:
-                    if not p.exists():
-                        self._basket.remove(p)
-            self._update_display()
+            self._cleanup_temp_zip()
+
+            if stale_files:
+                names = "\n".join(p.name for p in stale_files[:5])
+                QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+
+            action = config_manager.get("after_drop_action", "close")
+            if action == "close":
+                self.close()
+            elif action == "clear":
+                self._basket.clear()
+                self._update_display()
+            else:  # keep
+                self._update_display()
+        else:
+            is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+            is_move = (config_manager.get("default_transfer_mode", "copy") == "move") != is_shift
+            expected_action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
+
+            drag = QDrag(self)
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(p)) for p in valid_files])
+            drag.setMimeData(mime)
+            result = drag.exec(expected_action)
+
+            if stale_files:
+                names = "\n".join(p.name for p in stale_files[:5])
+                QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+
+            action = config_manager.get("after_drop_action", "close")
+            if action == "close":
+                self.close()
+            elif action == "clear":
+                self._basket.clear()
+                self._update_display()
+            else:  # keep
+                if result == Qt.DropAction.MoveAction:
+                    for p in valid_files:
+                        if not p.exists():
+                            self._basket.remove(p)
+                self._update_display()
 
     # ------------------------------------------------------------------
     # Display helpers
@@ -344,7 +400,6 @@ class CourierBasketWindow(QWidget):
     def _retranslate_ui(self) -> None:
         self._title_label.setText(tr("app.name"))
         self._empty_label.setText(tr("basket.empty_hint"))
-        self._clear_btn.setText(tr("basket.clear"))
         self._update_display()
 
     def _update_display(self) -> None:
@@ -355,11 +410,9 @@ class CourierBasketWindow(QWidget):
         if self._basket.is_empty:
             self._empty_label.show()
             self._info_label.setText("")
-            self._clear_btn.setVisible(False)
             return
 
         self._empty_label.hide()
-        self._clear_btn.setVisible(True)
 
         cnt = self._basket.count
         self._info_label.setText(tr("info.items", count=cnt, size=self._format_size(self._basket.total_size)))
@@ -388,8 +441,79 @@ class CourierBasketWindow(QWidget):
         return f"{n / (1024**idx):.1f} {units[idx]}"
 
     # ------------------------------------------------------------------
-    # Actions
+    # Compression helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _create_temp_zip(files: list[Path]) -> Path | None:
+        """Bundle *files* into a temporary zip and return its path."""
+        try:
+            fd, path = tempfile.mkstemp(suffix=".zip", prefix="courier_")
+            os.close(fd)
+
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in files:
+                    zf.write(f, f.name)
+            return Path(path)
+        except Exception as exc:
+            logger.exception("Failed to create temp zip: %s", exc)
+            return None
+
+    def _cleanup_temp_zip(self) -> None:
+        if self._temp_zip is not None:
+            try:
+                self._temp_zip.unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Failed to clean up temp zip: %s", self._temp_zip)
+            self._temp_zip = None
+
+    def _show_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: rgba(30, 30, 40, 235);
+                border: 1px solid rgba(255,255,255,25);
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                color: rgba(255,255,255,180);
+                padding: 6px 20px;
+                border-radius: 4px;
+                font-size: 9pt;
+            }
+            QMenu::item:selected {
+                background: rgba(255,255,255,30);
+                color: rgba(255,255,255,255);
+            }
+        """)
+
+        clear_act = QAction(tr("basket.clear"), self)
+        clear_act.triggered.connect(self._on_clear)
+        menu.addAction(clear_act)
+
+        compress_act = QAction(tr("basket.compress"), self)
+        compress_act.setCheckable(True)
+        compress_act.setChecked(config_manager.get("compress_on_drag", False))
+        compress_act.triggered.connect(
+            lambda checked: config_manager.set("compress_on_drag", checked)
+        )
+        menu.addAction(compress_act)
+
+        menu.addSeparator()
+
+        settings_act = QAction(tr("tray.settings"), self)
+        settings_act.triggered.connect(self._open_settings)
+        menu.addAction(settings_act)
+
+        menu.exec(self._menu_btn.mapToGlobal(
+            self._menu_btn.rect().bottomLeft() + QPoint(4, 0)
+        ))
+
+    def _open_settings(self) -> None:
+        from .settings_dialog import CourierSettingsDialog
+        dialog = CourierSettingsDialog(self)
+        dialog.exec()
 
     def _on_clear(self) -> None:
         count = self._basket.count
@@ -397,16 +521,7 @@ class CourierBasketWindow(QWidget):
         logger.info("Basket cleared | removed=%d", count)
         self._update_display()
 
-    def _minimize_to_tray(self) -> None:
-        """Hide to system tray instead of closing."""
-        self.hide()
-
     def closeEvent(self, event) -> None:
-        app = QApplication.instance()
-        if isinstance(app, QApplication) and app.property("_quitting"):
-            logger.debug("Window closed during quit")
-            event.accept()
-        else:
-            logger.debug("Window minimized to tray")
-            event.ignore()
-            self.hide()
+        self._cleanup_temp_zip()
+        logger.debug("Window closed")
+        event.accept()

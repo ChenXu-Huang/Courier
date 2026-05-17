@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QLineEdit, QMessageBox, QSpinBox,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QCheckBox, 
 )  # fmt: skip
 
 from ..config import config_manager
@@ -95,6 +95,14 @@ class FieldSpec(Generic[W]):
             set=lambda w, v: w.setText(str(v) if v is not None else ""),
         )
 
+    @staticmethod
+    def checkbox(key: str, label: str) -> FieldSpec[QCheckBox]:
+        return FieldSpec(
+            key=key, label=label, make=QCheckBox,
+            get=lambda w: w.isChecked(),
+            set=lambda w, v: w.setChecked(bool(v) if v is not None else False),
+        )
+
 
 def _validate_hotkey(w: QLineEdit) -> str | None:
     raw = w.text().strip()
@@ -106,6 +114,7 @@ def _validate_hotkey(w: QLineEdit) -> str | None:
 
 
 _FIELDS: list[FieldSpec[Any]] = [
+    FieldSpec.checkbox("show_on_startup", "settings.show_on_startup"),
     FieldSpec.int_spin("window_size", "settings.window_size", 200, 600, 10),
     FieldSpec.float_spin("window_opacity", "settings.window_opacity", 0.1, 1.0, 0.05, 2),
     FieldSpec.int_spin("window_radius", "settings.corner_radius", 0, 50),

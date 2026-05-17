@@ -5,6 +5,7 @@
   "basket.clear": "清空",
   "basket.more": "还有 {count} 个...",
   "basket.files_missing": "已跳过不存在的文件：\n{names}",
+  "basket.compress": "压缩拖出",
 
   "tray.new_window": "新建窗口",
   "tray.settings": "设置",
@@ -22,11 +23,13 @@
   "settings.transfer_mode.copy": "复制",
   "settings.transfer_mode.move": "移动",
   "settings.global_hotkey": "全局快捷键",
-  "settings.hotkey_placeholder": "例如 ctrl+shift+caps lock",
+  "settings.hotkey_placeholder": "macOS 避免使用 caps lock",
+  "settings.show_on_startup": "启动时显示窗口",
   "settings.language": "语言",
   "settings.invalid_title": "无效设置",
   "settings.validate_hotkey_empty": "快捷键不能为空",
 
+  "lang.auto": "自动",
   "lang.zh_CN": "中文",
   "lang.en_US": "英文",
 

@@ -41,9 +41,10 @@ def launch_gui() -> int:
     # --- Config ---
     config_manager.reload()
 
-    # --- Tray (starts first window) ---
+    # --- Tray (optionally shows first window) ---
     tray = CourierTrayManager()
-    tray.create_new_window()
+    if config_manager.get("show_on_startup", True):
+        tray.create_new_window()
 
     # --- Global hotkey ---
     hotkey = CourierHotkeyManager()
@@ -56,6 +57,9 @@ def launch_gui() -> int:
     hotkey.start()
     logger.info("Global hotkey registered | hotkey=%s", hotkey.hotkey)
 
+    tray.settings_about_to_open.connect(hotkey.stop)
+    tray.settings_closed.connect(hotkey.start)
+
     logger.info("Courier started successfully")
 
     # --- Event loop ---
@@ -63,6 +67,6 @@ def launch_gui() -> int:
 
     # --- Cleanup ---
     logger.info("Courier shutting down (code=%s)", exit_code)
-    hotkey.stop()
+    hotkey.cleanup()
     LoggerManager.shutdown()
     return exit_code
