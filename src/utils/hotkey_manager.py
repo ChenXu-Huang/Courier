@@ -143,11 +143,11 @@ class CourierHotkeyManager(QObject):
         self._pressed.clear()
 
     def _on_hotkey_changed(self, path: str, old: str, new: str) -> None:
-        """Restart the listener when the hotkey config changes."""
-        self.stop()
+        """Update the hotkey object. Listener restart is managed externally
+        (by the settings-close handler) since pynput's macOS Listener
+        cannot be safely stopped and restarted."""
         self._hotkey = Hotkey(config_manager.get("global_hotkey", "shift+caps lock"))
-        self.start()
-        logger.info("Hotkey reloaded: %r", self._hotkey)
+        logger.info("Hotkey updated: %r", self._hotkey)
 
     def _on_press(self, key: Key | KeyCode | None) -> None:
         """Called from the pynput listener thread on each key press."""

@@ -202,12 +202,16 @@ class CourierSettingsDialog(QDialog):
             QMessageBox.warning(self, tr("settings.invalid_title"), "\n".join(errors))
             return
 
-        for spec, widget in self._widgets.values():
-            config_manager.set(spec.key, spec.get(widget))
-        logger.info("Settings saved")
+        try:
+            for spec, widget in self._widgets.values():
+                config_manager.set(spec.key, spec.get(widget))
+            logger.info("Settings saved")
 
-        new_lang = self._lang_combo.currentData()
-        if new_lang != current_language():
-            set_language(new_lang)
+            new_lang = self._lang_combo.currentData()
+            if new_lang != current_language():
+                set_language(new_lang)
 
-        self.accept()
+            self.accept()
+        except BaseException:
+            logger.exception("Failed to save settings")
+            QMessageBox.critical(self, "Error", "Failed to save settings")
