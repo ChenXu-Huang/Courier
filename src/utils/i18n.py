@@ -1,88 +1,83 @@
 import json
-import locale
+import os
 from PySide6.QtCore import QObject, Signal
 
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
 
-_STRINGS: dict[str, dict[str, str]] = {}
 _LANG_DIR = RESOURCES_DIR / "lang"
 
 
-def _load_strings() -> None:
-    """Dynamically load all language files from lang/ folder."""
-    global _STRINGS
-    _STRINGS = {}
-    for path in _LANG_DIR.iterdir():
-        if path.is_file() and path.suffix == ".json":
-            loc = path.stem
-            with path.open(encoding="utf-8") as f:
-                _STRINGS[loc] = json.load(f)
-
-
-_load_strings()
-
-
-class _I18nBus(QObject):
-    """Global singleton that emits language-switch signals."""
+class I18n(QObject):
+    """Global i18n state & signal bus."""
 
     changed = Signal(str)
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._strings = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in _LANG_DIR.iterdir() if p.is_file() and p.suffix == ".json"}
+        self._system = self._detect()
+        self._current = config_manager.get("language", "auto")
 
-_bus = _I18nBus()
-language_changed = _bus.changed
+    def _detect(self) -> str:
+        """Detect system locale from env; skip C/POSIX."""
+        for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+            val = os.environ.get(var, "")
+            if not val:
+                continue
+            base = val.split(".")[0]
+            if base == "C":  # 同时拦住 C、C.UTF-8 等
+                continue
+            loc = base.replace("-", "_")
+            if loc in self._strings:
+                return loc
+        return "en_US"
 
-_current_locale: str = config_manager.get("language", "auto")
+    def _effective(self, raw: str) -> str:
+        return self._system if raw == "auto" else raw
+
+    def set(self, locale: str) -> None:
+        if locale not in self._strings and locale != "auto":
+            raise ValueError(f"Unsupported locale: {locale!r}. Available: {list(self._strings)}")
+        self._current = locale
+        self.changed.emit(locale)
+        config_manager.set("language", locale)
+
+    @property
+    def current(self) -> str:
+        return self._current
+
+    def tr(self, key: str, **kwargs) -> str:
+        loc = self._effective(self._current)
+        # 用 None 判断替代 or，避免空字符串误 fallback
+        text = self._strings.get(loc, {}).get(key)
+        if text is None:
+            text = self._strings.get("en_US", {}).get(key, key)
+        return text.format_map(kwargs) if kwargs else text
+
+    def available(self) -> list[tuple[str, str]]:
+        # 保留你想要的顺序，但自动包含 lang/ 目录里新增的其他语言
+        preferred = [k for k in ("zh_CN", "en_US", "ja_JP") if k in self._strings]
+        other = sorted(k for k in self._strings if k not in preferred)
+        keys = ["auto"] + preferred + other
+        return [(k, self.tr(f"lang.{k}")) for k in keys]
 
 
-def _resolve_locale(raw: str) -> str:
-    """If *raw* is ``"auto"``, detect from system; otherwise return as-is.
-
-    Falls back to ``"en_US"`` when the detected system locale has no
-    translation table.
-    """
-    if raw != "auto":
-        return raw
-    try:
-        sys_lang, _ = locale.getdefaultlocale()
-        if sys_lang:
-            lang = sys_lang.split(".")[0].replace("-", "_")
-            if lang in _STRINGS:
-                return lang
-    except Exception:
-        pass
-    return "en_US"
+_i18n = I18n()
+language_changed = _i18n.changed
 
 
 def set_language(locale: str) -> None:
-    """Hot-switch the language, emitting language_changed to all subscribers."""
-    global _current_locale
-    if locale not in _STRINGS and locale != "auto":
-        raise ValueError(f"Unsupported locale: {locale!r}. Available: {list(_STRINGS)}")
-    _current_locale = locale
-    _bus.changed.emit(locale)
-    config_manager.set("language", _current_locale)
+    _i18n.set(locale)
 
 
 def current_language() -> str:
-    return _current_locale
+    return _i18n.current
 
 
 def tr(key: str, **kwargs) -> str:
-    """Translate a string key.
-
-    Supports Python str.format_map-style placeholders:
-        tr("tool.coming_soon", name="JSON Formatter")
-    """
-    effective = _resolve_locale(_current_locale)
-    table = _STRINGS.get(effective, _STRINGS.get("en_US", {}))
-    text = table.get(key) or _STRINGS.get("en_US", {}).get(key, key)
-    return text.format_map(kwargs) if kwargs else text
+    return _i18n.tr(key, **kwargs)
 
 
 def available_languages() -> list[tuple[str, str]]:
-    """Return [(locale_key, display_name), ...]; display_name is always from the current language table."""
-    keys = ["zh_CN", "en_US", "ja_JP"]
-    items = [(k, tr(f"lang.{k}")) for k in keys if k in _STRINGS]
-    items.insert(0, ("auto", tr("lang.auto")))
-    return items
+    return _i18n.available()

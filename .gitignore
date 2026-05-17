@@ -1,10 +1,12 @@
 # python
 __pycache__/
 .venv/
-.pytest_cache/
-.mypy_cache/
+.*_cache/
 dist/
 *.egg-info
+
+# os
+.DS_Store
 
 # ide
 .vscode/
