@@ -34,6 +34,7 @@ Download the latest release for your platform from the [Releases page](https://g
 
 - **Windows** — Download `Courier-<version>-win.zip`, extract, and run `Courier.exe`.
 - **macOS** — Download `Courier-<version>-macos.dmg`, install, and open `Courier.app`.
+  > **Note:** The global hotkey feature requires system permissions. On first launch (or when setting a hotkey), macOS will prompt you to grant **Input Monitoring** and **Accessibility** permissions. Go to **System Settings → Privacy & Security** and enable Courier under both categories. The app will still work as a manual drag-and-drop basket without these permissions, but the global hotkey will not function until granted.
 - **Linux** — Download `Courier-<version>-linux.zip`, extract, and run `Courier`.
 
 ### From source

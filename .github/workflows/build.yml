@@ -7,15 +7,27 @@ on:
 
 jobs:
   build:
+    name: Build on ${{ matrix.os-short }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            os-short: windows
+          - os: ubuntu-latest
+            os-short: ubuntu
+          - os: macos-latest
+            os-short: macos
       fail-fast: false
 
     runs-on: ${{ matrix.os }}
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
@@ -25,37 +37,72 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Get metadata
-        shell: bash
-        run: ./build/metadata.sh "${{ github.ref_name }}" "${{ matrix.os }}" >> "$GITHUB_ENV"
+      - name: Extract metadata
+        run: |
+          REF_NAME="${{ github.ref_name }}"
+          if [[ "$REF_NAME" =~ ^v[0-9] ]]; then
+            echo "CLEAN_VERSION=${REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "CLEAN_VERSION=0.0.1" >> "$GITHUB_ENV"
+          fi
 
       - name: Build with Nuitka
-        shell: bash
         run: uv run nuitka --file-version=${{ env.CLEAN_VERSION }} main.py
 
       - name: Restructure package
-        shell: bash
-        run: ./build/restructure.sh
-
-      - name: Package DMG (macOS only)
-        if: runner.os == 'macOS'
-        shell: bash
         run: |
-          mv dist/main.app "dist/${{ github.event.repository.name }}.app"
-          brew install create-dmg
-          create-dmg \
-            --volname "${{ github.event.repository.name }}" \
-            --window-pos 200 120 \
-            --window-size 500 300 \
-            --icon-size 100 \
-            --icon "${{ github.event.repository.name }}.app" 150 150 \
-            --hide-extension "${{ github.event.repository.name }}.app" \
-            --app-drop-link 350 150 \
-            "dist/${{ github.event.repository.name }}.dmg" \
-            "dist/${{ github.event.repository.name }}.app"
+          if [ "${{ matrix.os-short }}" = "macos" ]; then
+            DEST="dist/main.app/Contents/Resources"
+          else
+            DEST="dist/main.dist/resources"
+          fi
+          echo "Staging assets into ${DEST}..."
+          mkdir -p "${DEST}"
+          if [ -d "resources" ]; then cp -r resources/. "${DEST}/"; fi
 
-      - name: Upload artifact
+      - name: Package archive
+        run: |
+          PROJECT_NAME="${{ github.event.repository.name }}"
+          cd dist
+
+          if [ "${{ matrix.os-short }}" = "macos" ]; then
+            mv main.app "${PROJECT_NAME}.app"
+            brew install create-dmg
+            create-dmg \
+              --volname "${PROJECT_NAME}" \
+              --window-pos 200 120 \
+              --window-size 500 300 \
+              --icon-size 100 \
+              --icon "${PROJECT_NAME}.app" 150 150 \
+              --hide-extension "${PROJECT_NAME}.app" \
+              --app-drop-link 350 150 \
+              "${PROJECT_NAME}.dmg" \
+              "${PROJECT_NAME}.app"
+            echo "DIST_FILE=dist/${PROJECT_NAME}.dmg" >> "$GITHUB_ENV"
+
+          elif [ "${{ matrix.os-short }}" = "windows" ]; then
+            7z a "${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.zip" main.dist/
+            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.zip" >> "$GITHUB_ENV"
+
+          else
+            tar czf "${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.tar.gz" main.dist/
+            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload to Release (tag only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.DIST_FILE }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact (manual only)
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}-${{ env.SHORT_OS }}-${{ github.ref_name }}
-          path: ${{ runner.os == 'macOS' && format('dist/{0}.dmg', github.event.repository.name) || 'dist/main.dist/' }}
+          name: ${{ github.event.repository.name }}-${{ matrix.os-short }}-${{ github.ref_name }}
+          path: ${{ env.DIST_FILE }}
