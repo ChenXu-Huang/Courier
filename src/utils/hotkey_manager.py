@@ -5,7 +5,9 @@ main thread via the event loop, making it safe to connect directly to
 GUI slots.
 """
 
-from pynput.keyboard import Key, KeyCode, Listener
+import threading
+import time
+from pynput.keyboard import Key, KeyCode, Listener, Controller
 from PySide6.QtCore import QObject, Signal
 
 from ..config import config_manager
@@ -102,6 +104,8 @@ class CourierHotkeyManager(QObject):
 
     hotkey_triggered = Signal()
 
+    _SYNTHETIC_WINDOW: float = 0.05
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._hotkey = Hotkey(config_manager.get("global_hotkey"))
@@ -109,6 +113,12 @@ class CourierHotkeyManager(QObject):
         self._pressed: set[Key | KeyCode] = set()
         self._fired = False
         self._unwatch = config_manager.on_change("global_hotkey", self._on_hotkey_changed)
+
+        self._controller = Controller()
+        self._caps_lock_lock = threading.Lock()
+        self._caps_lock_was_pressed = False
+        self._suppress_caps = 0
+        self._last_synthetic_time = 0.0
 
     @property
     def hotkey(self) -> str:
@@ -132,7 +142,7 @@ class CourierHotkeyManager(QObject):
         self.stop()
 
     def stop(self) -> None:
-        """Unregister the global hotkey."""
+        """Unregister the global hotkey and reset Caps Lock state."""
         if self._listener is None:
             return
         try:
@@ -141,6 +151,9 @@ class CourierHotkeyManager(QObject):
             pass
         self._listener = None
         self._pressed.clear()
+        with self._caps_lock_lock:
+            self._caps_lock_was_pressed = False
+            self._suppress_caps = 0
 
     def _on_hotkey_changed(self, path: str, old: str, new: str) -> None:
         """Update the hotkey object. Listener restart is managed externally
@@ -149,10 +162,44 @@ class CourierHotkeyManager(QObject):
         self._hotkey = Hotkey(config_manager.get("global_hotkey"))
         logger.info("Hotkey updated: %r", self._hotkey)
 
+    def _is_synthetic_caps(self) -> bool:
+        """Heuristic: true if the event arrived within the synthetic window."""
+        return time.monotonic() - self._last_synthetic_time < self._SYNTHETIC_WINDOW
+
+    def _restore_caps_lock(self) -> None:
+        """Toggle Caps Lock back to its original state.
+
+        This is a best-effort cross-platform workaround: pynput cannot
+        suppress the OS-level Caps Lock toggle, so we compensate by sending
+        a synthetic press+release.  On macOS this requires Accessibility
+        permission; if absent we degrade gracefully.
+        """
+        with self._caps_lock_lock:
+            self._suppress_caps = 2
+            self._last_synthetic_time = time.monotonic()
+
+        try:
+            self._controller.press(Key.caps_lock)
+            self._controller.release(Key.caps_lock)
+        except OSError as exc:
+            logger.warning("Failed to restore Caps Lock state: %s", exc)
+            with self._caps_lock_lock:
+                self._suppress_caps = 0
+
     def _on_press(self, key: Key | KeyCode | None) -> None:
         """Called from the pynput listener thread on each key press."""
         if key is None:
             return
+
+        if key == Key.caps_lock:
+            with self._caps_lock_lock:
+                if self._suppress_caps > 0:
+                    self._suppress_caps -= 1
+                    return
+            if self._is_synthetic_caps():
+                return
+            self._caps_lock_was_pressed = True
+
         self._pressed.add(key)
         if not self._fired and self._hotkey.is_active(self._pressed):
             self._fired = True
@@ -163,5 +210,18 @@ class CourierHotkeyManager(QObject):
         if key is None:
             return
         self._pressed.discard(key)
+
+        if key == Key.caps_lock:
+            with self._caps_lock_lock:
+                if self._suppress_caps > 0:
+                    self._suppress_caps -= 1
+                    return
+            if self._is_synthetic_caps():
+                return
+
+            if self._caps_lock_was_pressed:
+                self._caps_lock_was_pressed = False
+                self._restore_caps_lock()
+
         if self._fired and not self._hotkey.is_active(self._pressed):
             self._fired = False
