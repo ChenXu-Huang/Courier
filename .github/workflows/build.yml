@@ -76,17 +76,17 @@ jobs:
               --icon "${PROJECT_NAME}.app" 150 150 \
               --hide-extension "${PROJECT_NAME}.app" \
               --app-drop-link 350 150 \
-              "${PROJECT_NAME}.dmg" \
+              "${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.dmg" \
               "${PROJECT_NAME}.app"
-            echo "DIST_FILE=dist/${PROJECT_NAME}.dmg" >> "$GITHUB_ENV"
+            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.dmg" >> "$GITHUB_ENV"
 
           elif [ "${{ matrix.os-short }}" = "windows" ]; then
-            7z a "${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.zip" main.dist/
-            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.zip" >> "$GITHUB_ENV"
+            7z a "${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.zip" main.dist/
+            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.zip" >> "$GITHUB_ENV"
 
           else
-            tar czf "${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.tar.gz" main.dist/
-            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ matrix.os-short }}-${{ env.CLEAN_VERSION }}.tar.gz" >> "$GITHUB_ENV"
+            tar czf "${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.tar.gz" main.dist/
+            echo "DIST_FILE=dist/${PROJECT_NAME}-${{ env.CLEAN_VERSION }}-${{ matrix.os-short }}.tar.gz" >> "$GITHUB_ENV"
           fi
 
       - name: Upload to Release (tag only)
