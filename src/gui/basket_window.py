@@ -10,7 +10,7 @@ from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from .._meta import IS_MACOS, RESOURCES_DIR
+from .._meta import IS_MACOS, IS_WINDOWS, RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket
@@ -50,10 +50,16 @@ class CourierBasketWindow(QWidget):
         size = max(200, min(600, size))
 
         self.setFixedSize(size, size)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint | 
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.Tool |
+            Qt.WindowType.NoDropShadowWindowHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setAcceptDrops(True)
         logger.debug("Window created | size=%d", size)
 
@@ -134,6 +140,48 @@ class CourierBasketWindow(QWidget):
             logger.warning("macOS topmost ctypes failed: %s", exc)
             return False
 
+    def _suppress_dwm_rounding(self) -> bool:
+        """Disable Windows 11 DWM automatic corner rounding for this window.
+
+        When ``WA_TranslucentBackground`` is active, the DWM clips the window
+        with its own rounded corners (≈ 8–10 px radius on Windows 11).  That
+        clip outline appears as a thin arc *outside* the painted round-rect,
+        producing a ghost border at a smaller radius than ``window_radius``.
+        Setting ``DWMWA_WINDOW_CORNER_PREFERENCE`` to ``DWMWCP_DONOTROUND``
+        (1) disables the DWM rounding entirely, so that only the radius
+        painted in :meth:`paintEvent` is visible.
+
+        Returns ``True`` on success, ``False`` if the attribute could not be
+        set (e.g. Windows 10 where the attribute is a no-op, or when running
+        on a non-Windows platform where ``windll`` is unavailable).
+        """
+        import ctypes
+
+        # Defined in <dwmapi.h> — present since Windows 11 Build 22000.
+        _DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        _DWMWCP_DONOTROUND = 1
+
+        try:
+            hwnd = ctypes.c_void_p(int(self.winId()))
+            preference = ctypes.c_int(_DWMWCP_DONOTROUND)
+            result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                _DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(preference),
+                ctypes.sizeof(preference),
+            )
+            if result != 0:  # S_OK == 0
+                logger.debug(
+                    "DWM corner suppression returned HRESULT=0x%08X",
+                    result & 0xFFFFFFFF,
+                )
+                return False
+            logger.debug("DWM automatic corner rounding suppressed")
+            return True
+        except Exception as exc:
+            logger.warning("DwmSetWindowAttribute failed: %s", exc)
+            return False
+
     def _create_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -143,6 +191,7 @@ class CourierBasketWindow(QWidget):
         self._header = QWidget()
         self._header.setFixedHeight(int(self.height() * _HEADER_RATIO))
         self._header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._header.setStyleSheet("background: transparent;")
         hl = QHBoxLayout(self._header)
         hl.setContentsMargins(44, 0, 44, 0)
         hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -242,6 +291,7 @@ class CourierBasketWindow(QWidget):
         # -- Footer --
         self._footer = QWidget()
         self._footer.setFixedHeight(int(self.height() * _FOOTER_RATIO))
+        self._footer.setStyleSheet("background: transparent;")
 
         # -- Assemble --
         layout.addWidget(self._header)
@@ -251,6 +301,10 @@ class CourierBasketWindow(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
@@ -264,12 +318,15 @@ class CourierBasketWindow(QWidget):
     # Drag-in (accept files from external)
     # ------------------------------------------------------------------
 
-    # Show event (macOS topmost activation)
+    # Show event — platform-specific one-time fixups
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if IS_MACOS and not getattr(self, "_macos_level_set", False):
             if self._enforce_macos_topmost():
                 self._macos_level_set = True
+        elif IS_WINDOWS and not getattr(self, "_dwm_rounding_suppressed", False):
+            if self._suppress_dwm_rounding():
+                self._dwm_rounding_suppressed = True
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
