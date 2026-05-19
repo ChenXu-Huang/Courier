@@ -104,7 +104,7 @@ class CourierHotkeyManager(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._hotkey = Hotkey(config_manager.get("global_hotkey", "shift+caps lock"))
+        self._hotkey = Hotkey(config_manager.get("global_hotkey"))
         self._listener: Listener | None = None
         self._pressed: set[Key | KeyCode] = set()
         self._fired = False
@@ -146,7 +146,7 @@ class CourierHotkeyManager(QObject):
         """Update the hotkey object. Listener restart is managed externally
         (by the settings-close handler) since pynput's macOS Listener
         cannot be safely stopped and restarted."""
-        self._hotkey = Hotkey(config_manager.get("global_hotkey", "shift+caps lock"))
+        self._hotkey = Hotkey(config_manager.get("global_hotkey"))
         logger.info("Hotkey updated: %r", self._hotkey)
 
     def _on_press(self, key: Key | KeyCode | None) -> None:

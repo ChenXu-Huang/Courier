@@ -23,7 +23,7 @@ class I18n:
         self.changed = self._bus.changed
         self._strings = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in _LANG_DIR.iterdir() if p.is_file() and p.suffix == ".json"}
         self._system = self._detect()
-        self._current = config_manager.get("language", "auto")
+        self._current = config_manager.get("language")
 
     def _detect(self) -> str:
         """Detect system locale. macOS plist first, then QLocale."""

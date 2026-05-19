@@ -47,7 +47,7 @@ class CourierBasketWindow(QWidget):
         language_changed.connect(self._retranslate_ui)
 
     def _setup_window(self) -> None:
-        size = int(config_manager.get("window_size", 320))
+        size = int(config_manager.get("window_size"))
         size = max(200, min(600, size))
 
         self.setFixedSize(size, size)
@@ -60,12 +60,24 @@ class CourierBasketWindow(QWidget):
 
     def _apply_theme(self) -> None:
         self._bg_color = QColor(30, 30, 40, 235)
-        self._radius = int(config_manager.get("window_radius", 20))
+        self._radius = int(config_manager.get("window_radius"))
         self._border_color = QColor(255, 255, 255, 25)
 
-        opacity = float(config_manager.get("window_opacity", 0.92))
+        opacity = float(config_manager.get("window_opacity"))
         self.setWindowOpacity(opacity)
         logger.debug("Theme applied | radius=%d opacity=%.2f", self._radius, opacity)
+
+    @property
+    def _font_scale(self) -> float:
+        """DPI-aware font scale factor, platform-adjusted."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return 1.0
+
+        dpi = screen.logicalDotsPerInch()
+        if sys.platform == "darwin":  # MacOS: baseline 72 DPI
+            return max(1.0, min(3.0, (dpi / 72.0) * 1.2))
+        return max(0.8, min(3.0, dpi / 96.0))  # Windows / Linux: baseline 96 DPI
 
     def _enforce_macos_topmost(self) -> bool:
         """Float the window above all others via the Objective-C runtime.
@@ -138,14 +150,14 @@ class CourierBasketWindow(QWidget):
 
         self._title_label = QLabel(tr("app.name"))
         tf = QFont()
-        tf.setPointSize(11)
+        tf.setPointSize(round(11 * self._font_scale))
         tf.setBold(True)
         self._title_label.setFont(tf)
         self._title_label.setStyleSheet("color: rgba(255,255,255,200);")
 
         self._info_label = QLabel()
         inf = QFont()
-        inf.setPointSize(8)
+        inf.setPointSize(round(8 * self._font_scale))
         self._info_label.setFont(inf)
         self._info_label.setStyleSheet("color: rgba(255,255,255,110);")
 
@@ -222,7 +234,7 @@ class CourierBasketWindow(QWidget):
 
         self._empty_label = QLabel(tr("basket.empty_hint"))
         ef = QFont()
-        ef.setPointSize(10)
+        ef.setPointSize(round(10 * self._font_scale))
         self._empty_label.setFont(ef)
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setStyleSheet("color: rgba(255,255,255,80);")
@@ -336,7 +348,7 @@ class CourierBasketWindow(QWidget):
 
         valid_files = self._basket.files
 
-        compress = config_manager.get("compress_on_drag", False)
+        compress = config_manager.get("compress_on_drag")
 
         if compress:
             zip_path = self._create_temp_zip(valid_files)
@@ -357,7 +369,7 @@ class CourierBasketWindow(QWidget):
                 names = "\n".join(p.name for p in stale_files[:5])
                 QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
 
-            action = config_manager.get("after_drop_action", "close")
+            action = config_manager.get("after_drop_action")
             if action == "close":
                 self.close()
             elif action == "clear":
@@ -367,7 +379,7 @@ class CourierBasketWindow(QWidget):
                 self._update_display()
         else:
             is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
-            is_move = (config_manager.get("default_transfer_mode", "copy") == "move") != is_shift
+            is_move = (config_manager.get("default_transfer_mode") == "move") != is_shift
             expected_action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
 
             drag = QDrag(self)
@@ -380,7 +392,7 @@ class CourierBasketWindow(QWidget):
                 names = "\n".join(p.name for p in stale_files[:5])
                 QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
 
-            action = config_manager.get("after_drop_action", "close")
+            action = config_manager.get("after_drop_action")
             if action == "close":
                 self.close()
             elif action == "clear":
@@ -422,13 +434,19 @@ class CourierBasketWindow(QWidget):
         for p, label in self._basket.display_labels(_MAX_VISIBLE_FILES):
             lb = QLabel(label)
             lb.setToolTip(str(p))
-            lb.setStyleSheet("color: rgba(255,255,255,180); font-size: 9pt;")
+            fl = QFont()
+            fl.setPointSize(round(9 * self._font_scale))
+            lb.setFont(fl)
+            lb.setStyleSheet("color: rgba(255,255,255,180);")
             self._fl_layout.addWidget(lb)
             self._file_labels.append(lb)
 
         if remaining > 0:
             more = QLabel(tr("basket.more", count=remaining))
-            more.setStyleSheet("color: rgba(255,255,255,100); font-size: 9pt;")
+            ml = QFont()
+            ml.setPointSize(round(9 * self._font_scale))
+            more.setFont(ml)
+            more.setStyleSheet("color: rgba(255,255,255,100);")
             self._fl_layout.addWidget(more)
             self._file_labels.append(more)
 
@@ -469,23 +487,24 @@ class CourierBasketWindow(QWidget):
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
+        mfs = round(9 * self._font_scale)
+        menu.setStyleSheet(f"""
+            QMenu {{
                 background: rgba(30, 30, 40, 235);
                 border: 1px solid rgba(255,255,255,25);
                 border-radius: 8px;
                 padding: 4px;
-            }
-            QMenu::item {
+            }}
+            QMenu::item {{
                 color: rgba(255,255,255,180);
                 padding: 6px 20px;
                 border-radius: 4px;
-                font-size: 9pt;
-            }
-            QMenu::item:selected {
+                font-size: {mfs}pt;
+            }}
+            QMenu::item:selected {{
                 background: rgba(255,255,255,30);
                 color: rgba(255,255,255,255);
-            }
+            }}
         """)
 
         clear_act = QAction(tr("basket.clear"), self)
@@ -494,7 +513,7 @@ class CourierBasketWindow(QWidget):
 
         compress_act = QAction(tr("basket.compress"), self)
         compress_act.setCheckable(True)
-        compress_act.setChecked(config_manager.get("compress_on_drag", False))
+        compress_act.setChecked(config_manager.get("compress_on_drag"))
         compress_act.triggered.connect(
             lambda checked: config_manager.set("compress_on_drag", checked)
         )

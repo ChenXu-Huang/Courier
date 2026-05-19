@@ -43,15 +43,15 @@ def launch_gui() -> int:
 
     # --- Tray (optionally shows first window) ---
     tray = CourierTrayManager()
-    if config_manager.get("show_on_startup", True):
+    if config_manager.get("show_on_startup"):
         tray.create_new_window()
 
     # --- Global hotkey ---
     hotkey = CourierHotkeyManager()
     hotkey.hotkey_triggered.connect(
         lambda: tray.create_new_window_at(
-            QCursor.pos().x() - config_manager.get("window_size", 320) // 2,
-            QCursor.pos().y() - config_manager.get("window_size", 320) // 2,
+            QCursor.pos().x() - config_manager.get("window_size") // 2,
+            QCursor.pos().y() - config_manager.get("window_size") // 2,
         )
     )
     hotkey.start()

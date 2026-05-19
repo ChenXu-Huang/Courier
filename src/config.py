@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "language": "auto",
-    "window_size": 320,
+    "window_size": 240,
     "window_opacity": 0.90,
     "window_radius": 20,
     "after_drop_action": "close",
@@ -133,10 +133,21 @@ class JsonConfigManager:
                     except Exception:
                         logger.exception("Callback failed for %s", path)
 
-    def get(self, path: str, default: Any = None) -> Any:
-        """Retrieve value at *path* (dot-separated)."""
+    def get(self, path: str, default: Any = _MISSING) -> Any:
+        """Retrieve value at *path* (dot-separated).
+
+        Falls back to ``self._default`` (if set) when *path* is not fount
+        in loaded config. Pass an explicit *default* to override.
+        """
         self._ensure_loaded()
-        return self._get_nested(self._data, path, default)
+        val = self._get_nested(self._data, path, _MISSING)
+        if val is not _MISSING:
+            return val
+        if self._default is not None:
+            val = self._get_nested(self._default, path, _MISSING)
+            if val is not _MISSING:
+                return val
+        return default
 
     def set(self, path: str, value: Any) -> None:
         """Set *value* at *path*, marking store dirty and auto-saving."""
