@@ -2,7 +2,6 @@
 
 import math
 import os
-import sys
 import tempfile
 import uuid
 import zipfile
@@ -11,7 +10,7 @@ from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from .._meta import RESOURCES_DIR
+from .._meta import IS_MACOS, RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket
@@ -75,7 +74,7 @@ class CourierBasketWindow(QWidget):
             return 1.0
 
         dpi = screen.logicalDotsPerInch()
-        if sys.platform == "darwin":  # MacOS: baseline 72 DPI
+        if IS_MACOS:  # MacOS: baseline 72 DPI
             return max(1.0, min(3.0, (dpi / 72.0) * 1.2))
         return max(0.8, min(3.0, dpi / 96.0))  # Windows / Linux: baseline 96 DPI
 
@@ -268,7 +267,7 @@ class CourierBasketWindow(QWidget):
     # Show event (macOS topmost activation)
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if sys.platform == "darwin" and not getattr(self, "_macos_level_set", False):
+        if IS_MACOS and not getattr(self, "_macos_level_set", False):
             if self._enforce_macos_topmost():
                 self._macos_level_set = True
 

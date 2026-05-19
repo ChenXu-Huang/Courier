@@ -1,11 +1,10 @@
 __all__ = ["config_manager"]
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from ._meta import CONFIG_DIR
+from ._meta import CONFIG_DIR, IS_MACOS
 from .logger import get_logger, log_exceptions
 
 logger = get_logger(__name__)
@@ -17,7 +16,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "window_radius": 20,
     "after_drop_action": "close",
     "default_transfer_mode": "copy",
-    "global_hotkey": "shift+enter" if sys.platform == "darwin" else "shift+caps lock",
+    "global_hotkey": "shift+enter" if IS_MACOS else "shift+caps lock",
     "show_on_startup": True,
     "compress_on_drag": False,
 }

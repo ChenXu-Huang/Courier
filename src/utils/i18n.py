@@ -1,10 +1,9 @@
 import json
 import os
-import sys
 import plistlib
 from PySide6.QtCore import QObject, Signal, QLocale
 
-from .._meta import RESOURCES_DIR
+from .._meta import IS_MACOS, RESOURCES_DIR
 from ..config import config_manager
 
 _LANG_DIR = RESOURCES_DIR / "lang"
@@ -27,7 +26,7 @@ class I18n:
 
     def _detect(self) -> str:
         """Detect system locale. macOS plist first, then QLocale."""
-        if sys.platform == "darwin":
+        if IS_MACOS:
             path = os.path.expanduser(_MAC_PLIST_PATH)
             with open(path, "rb") as f:
                 plist = plistlib.load(f)
