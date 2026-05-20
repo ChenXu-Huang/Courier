@@ -11,6 +11,7 @@ logger = get_logger(__name__)
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "language": "auto",
+    "theme_mode": "auto",
     "window_size": 240,
     "window_opacity": 0.90,
     "window_radius": 20,

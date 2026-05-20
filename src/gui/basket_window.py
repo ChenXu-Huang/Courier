@@ -7,23 +7,117 @@ import uuid
 import zipfile
 from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
-from PySide6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QAction, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
-from .._meta import IS_MACOS, IS_WINDOWS, RESOURCES_DIR
+from .._meta import IS_MACOS, IS_WINDOWS
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket
 from ..utils.i18n import tr, language_changed
+from .theme import theme_manager
 
 logger = get_logger(__name__)
 
-_CLOSE_ICON_PATH = RESOURCES_DIR / "icons" / "close.svg"
-_MENU_ICON_PATH = RESOURCES_DIR / "icons" / "menu.svg"
-
+_EXPAND_PANEL_HEIGHT = 160
 _HEADER_RATIO = 0.15
 _FOOTER_RATIO = 0.15
 _MAX_VISIBLE_FILES = 8
+
+
+class _ExpandFooter:
+    """Manages the collapsible footer pill button and expand panel."""
+
+    def __init__(self, base_size: int, font_scale: float, parent: QWidget | None = None) -> None:
+        self._font_scale = font_scale
+        self._expanded = False
+        self._count = 0
+
+        # -- Footer widget --
+        self._footer = QWidget(parent)
+        self._footer.setObjectName("courier-footer")
+        self._footer.setFixedHeight(int(base_size * _FOOTER_RATIO))
+
+        # -- Icons --
+        self._chevron_down = theme_manager.chevron_down_icon
+        self._chevron_up = theme_manager.chevron_up_icon
+
+        # -- Pill button --
+        self._pill_btn = QPushButton(self._footer)
+        self._pill_btn.setObjectName("courier-pill-btn")
+        self._pill_btn.setIcon(self._chevron_down)
+        self._pill_btn.setIconSize(QSize(14, 14))
+        self._pill_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self._pill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pill_btn.setFixedHeight(30)
+        pf = QFont()
+        pf.setPointSize(round(10 * font_scale))
+        self._pill_btn.setFont(pf)
+        self._pill_btn.hide()
+
+        fl = QHBoxLayout(self._footer)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fl.addWidget(self._pill_btn)
+
+        # -- Expand panel --
+        self._panel = QWidget(parent)
+        self._panel.setObjectName("courier-expand-panel")
+        self._panel.setFixedHeight(_EXPAND_PANEL_HEIGHT)
+        self._panel.hide()
+
+    # ------------------------------------------------------------------
+    # Accessors
+    # ------------------------------------------------------------------
+
+    @property
+    def footer(self) -> QWidget:
+        return self._footer
+
+    @property
+    def panel(self) -> QWidget:
+        return self._panel
+
+    @property
+    def pill(self) -> QPushButton:
+        return self._pill_btn
+
+    @property
+    def is_expanded(self) -> bool:
+        return self._expanded
+
+    @property
+    def expand_height(self) -> int:
+        return _EXPAND_PANEL_HEIGHT
+
+    # ------------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------------
+
+    def set_count(self, count: int) -> None:
+        """Update visible state according to staged file count."""
+        self._count = count
+        if count == 0:
+            if self._expanded:
+                self._expanded = False
+                self._panel.hide()
+                self._pill_btn.setIcon(self._chevron_down)
+            self._pill_btn.hide()
+        else:
+            self._pill_btn.setText(tr("basket.file_count", count=count))
+            self._pill_btn.show()
+
+    def toggle(self) -> None:
+        """Flip expanded / collapsed."""
+        self._expanded = not self._expanded
+        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
+        self._panel.setVisible(self._expanded)
+
+    def refresh_icons(self) -> None:
+        """Recreate icons with current theme colour."""
+        self._chevron_down = theme_manager.chevron_down_icon
+        self._chevron_up = theme_manager.chevron_up_icon
+        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
 
 
 class CourierBasketWindow(QWidget):
@@ -41,9 +135,11 @@ class CourierBasketWindow(QWidget):
 
         self._setup_window()
         self._create_ui()
-        self._apply_theme()
+        self._apply_opacity()
+        self._apply_theme_stylesheet()
         self._update_display()
         language_changed.connect(self._retranslate_ui)
+        theme_manager.theme_changed.connect(self._on_theme_changed)
 
     def _setup_window(self) -> None:
         size = int(config_manager.get("window_size"))
@@ -51,10 +147,10 @@ class CourierBasketWindow(QWidget):
 
         self.setFixedSize(size, size)
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | 
-            Qt.WindowType.WindowStaysOnTopHint | 
-            Qt.WindowType.Tool |
-            Qt.WindowType.NoDropShadowWindowHint
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -63,14 +159,29 @@ class CourierBasketWindow(QWidget):
         self.setAcceptDrops(True)
         logger.debug("Window created | size=%d", size)
 
-    def _apply_theme(self) -> None:
-        self._bg_color = QColor(30, 30, 40, 235)
-        self._radius = int(config_manager.get("window_radius"))
-        self._border_color = QColor(255, 255, 255, 25)
-
+    def _apply_opacity(self) -> None:
         opacity = float(config_manager.get("window_opacity"))
         self.setWindowOpacity(opacity)
-        logger.debug("Theme applied | radius=%d opacity=%.2f", self._radius, opacity)
+        logger.debug("Opacity applied | opacity=%.2f", opacity)
+
+    def _apply_theme_stylesheet(self) -> None:
+        self._radius = int(config_manager.get("window_radius"))
+        self.setStyleSheet(theme_manager.window_stylesheet())
+        self.update()
+        logger.debug("Theme stylesheet applied | radius=%d", self._radius)
+
+    def _on_theme_changed(self, theme: str) -> None:
+        logger.debug("Theme changed to %s, re-applying stylesheet", theme)
+        self._apply_theme_stylesheet()
+        self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        """Recreate all SVG icons with the current theme stroke colour."""
+        self._close_icon = theme_manager.close_icon
+        self._title_close_btn.setIcon(self._close_icon)
+        self._menu_icon = theme_manager.menu_icon
+        self._menu_btn.setIcon(self._menu_icon)
+        self._expander.refresh_icons()
 
     @property
     def _font_scale(self) -> float:
@@ -183,62 +294,53 @@ class CourierBasketWindow(QWidget):
             return False
 
     def _create_ui(self) -> None:
+        base_size = self.height()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # -- Square content area --
+        self._square_container = QWidget()
+        self._square_container.setObjectName("courier-square-container")
+        self._square_container.setFixedHeight(base_size)
+        square_layout = QVBoxLayout(self._square_container)
+        square_layout.setContentsMargins(0, 0, 0, 0)
+        square_layout.setSpacing(0)
+
         # -- Header (transparent — enables window drag) --
         self._header = QWidget()
-        self._header.setFixedHeight(int(self.height() * _HEADER_RATIO))
+        self._header.setObjectName("courier-header")
+        self._header.setFixedHeight(int(base_size * _HEADER_RATIO))
         self._header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._header.setStyleSheet("background: transparent;")
         hl = QHBoxLayout(self._header)
         hl.setContentsMargins(44, 0, 44, 0)
         hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._title_label = QLabel(tr("app.name"))
+        self._title_label.setObjectName("courier-title")
         tf = QFont()
         tf.setPointSize(round(11 * self._font_scale))
         tf.setBold(True)
         self._title_label.setFont(tf)
-        self._title_label.setStyleSheet("color: rgba(255,255,255,200);")
-
-        self._info_label = QLabel()
-        inf = QFont()
-        inf.setPointSize(round(8 * self._font_scale))
-        self._info_label.setFont(inf)
-        self._info_label.setStyleSheet("color: rgba(255,255,255,110);")
 
         header_text_col = QVBoxLayout()
         header_text_col.setContentsMargins(0, 10, 0, 4)
         header_text_col.setSpacing(1)
         header_text_col.addWidget(self._title_label)
-        header_text_col.addWidget(self._info_label)
 
         hl.addLayout(header_text_col)
 
         # -- X close button (direct child of window, overlaid at top-right) --
-        close_icon = QIcon(str(_CLOSE_ICON_PATH))
-        close_icon.setIsMask(True)
+        self._close_icon = theme_manager.close_icon
 
         self._title_close_btn = QPushButton(self)
-        self._title_close_btn.setIcon(close_icon)
+        self._title_close_btn.setObjectName("courier-close-btn")
+        self._title_close_btn.setIcon(self._close_icon)
         self._title_close_btn.setIconSize(QSize(16, 16))
         self._title_close_btn.setFlat(True)
         self._title_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._title_close_btn.setFixedSize(28, 28)
-        self._title_close_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(255,255,255,30);
-                border: none;
-                border-radius: 14px;
-                color: rgba(255,255,255,200);
-            }
-            QPushButton:hover {
-                background: rgba(255,255,255,60);
-                color: rgba(255,255,255,255);
-            }
-        """)
         self._title_close_btn.clicked.connect(self.close)
         btn_size = 28
         margin = 8
@@ -246,57 +348,51 @@ class CourierBasketWindow(QWidget):
         self._title_close_btn.raise_()
 
         # -- Menu button (top-left) --
-        menu_icon = QIcon(str(_MENU_ICON_PATH))
-        menu_icon.setIsMask(True)
+        self._menu_icon = theme_manager.menu_icon
 
-        btn_style_menu = """
-            QPushButton {
-                background: rgba(255,255,255,30);
-                border: none;
-                border-radius: 14px;
-                color: rgba(255,255,255,200);
-            }
-            QPushButton:hover {
-                background: rgba(255,255,255,60);
-                color: rgba(255,255,255,255);
-            }
-        """
         self._menu_btn = QPushButton(self)
-        self._menu_btn.setIcon(menu_icon)
+        self._menu_btn.setObjectName("courier-menu-btn")
+        self._menu_btn.setIcon(self._menu_icon)
         self._menu_btn.setIconSize(QSize(16, 16))
         self._menu_btn.setFlat(True)
         self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._menu_btn.setFixedSize(btn_size, btn_size)
-        self._menu_btn.setStyleSheet(btn_style_menu)
         self._menu_btn.setGeometry(margin, margin, btn_size, btn_size)
         self._menu_btn.clicked.connect(self._show_menu)
 
         # -- File list --
         self._file_list = QWidget()
+        self._file_list.setObjectName("courier-file-list")
         self._file_list.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._file_list.setStyleSheet("background: transparent;")
         self._fl_layout = QVBoxLayout(self._file_list)
         self._fl_layout.setContentsMargins(20, 4, 20, 4)
         self._fl_layout.setSpacing(3)
         self._fl_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._empty_label = QLabel(tr("basket.empty_hint"))
+        self._empty_label.setObjectName("courier-empty-label")
         ef = QFont()
         ef.setPointSize(round(10 * self._font_scale))
         self._empty_label.setFont(ef)
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet("color: rgba(255,255,255,80);")
         self._fl_layout.addWidget(self._empty_label)
 
-        # -- Footer --
-        self._footer = QWidget()
-        self._footer.setFixedHeight(int(self.height() * _FOOTER_RATIO))
-        self._footer.setStyleSheet("background: transparent;")
+        # -- Footer & expand panel (managed by _ExpandFooter) --
+        self._expander = _ExpandFooter(base_size, self._font_scale, self)
+        self._expander.pill.clicked.connect(self._toggle_expand)
 
-        # -- Assemble --
-        layout.addWidget(self._header)
-        layout.addWidget(self._file_list, 1)
-        layout.addWidget(self._footer)
+        # -- Assemble square container --
+        square_layout.addWidget(self._header)
+        square_layout.addWidget(self._file_list, 1)
+        square_layout.addWidget(self._expander.footer)
+
+        # -- Assemble window --
+        layout.addWidget(self._square_container)
+        layout.addWidget(self._expander.panel)
+
+        # Re-raise buttons so they stack above the container widgets
+        self._title_close_btn.raise_()
+        self._menu_btn.raise_()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -310,8 +406,8 @@ class CourierBasketWindow(QWidget):
         path = QPainterPath()
         path.addRoundedRect(rect, self._radius, self._radius)
 
-        painter.setPen(QPen(self._border_color, 1))
-        painter.fillPath(path, self._bg_color)
+        painter.setPen(QPen(theme_manager.border_color(), 1))
+        painter.fillPath(path, theme_manager.bg_color())
         painter.drawPath(path)
 
     # ------------------------------------------------------------------
@@ -347,8 +443,13 @@ class CourierBasketWindow(QWidget):
         if paths:
             added = self._basket.add(paths)
             paths_str = ", ".join(str(p) for p in paths)
-            logger.info("Files dropped | added=%d paths=[%s] total=%d size=%s",
-                        added, paths_str, self._basket.count, self._format_size(self._basket.total_size))
+            logger.info(
+                "Files dropped | added=%d paths=[%s] total=%d size=%s",
+                added,
+                paths_str,
+                self._basket.count,
+                self._format_size(self._basket.total_size),
+            )
             self._update_display()
         else:
             logger.warning("Drop event with no valid file URLs")
@@ -403,7 +504,6 @@ class CourierBasketWindow(QWidget):
             return
 
         valid_files = self._basket.files
-
         compress = config_manager.get("compress_on_drag")
 
         if compress:
@@ -412,54 +512,43 @@ class CourierBasketWindow(QWidget):
                 logger.warning("Compression failed, drag-out cancelled")
                 return
             self._temp_zip = zip_path
-
-            drag = QDrag(self)
-            mime = QMimeData()
-            mime.setUrls([QUrl.fromLocalFile(str(zip_path))])
-            drag.setMimeData(mime)
-            result = drag.exec(Qt.DropAction.CopyAction)
-
-            self._cleanup_temp_zip()
-
-            if stale_files:
-                names = "\n".join(p.name for p in stale_files[:5])
-                QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
-
-            action = config_manager.get("after_drop_action")
-            if action == "close":
-                self.close()
-            elif action == "clear":
-                self._basket.clear()
-                self._update_display()
-            else:  # keep
-                self._update_display()
+            urls = [QUrl.fromLocalFile(str(zip_path))]
+            action = Qt.DropAction.CopyAction
         else:
             is_shift = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
             is_move = (config_manager.get("default_transfer_mode") == "move") != is_shift
-            expected_action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
+            action = Qt.DropAction.MoveAction if is_move else Qt.DropAction.CopyAction
+            urls = [QUrl.fromLocalFile(str(p)) for p in valid_files]
 
-            drag = QDrag(self)
-            mime = QMimeData()
-            mime.setUrls([QUrl.fromLocalFile(str(p)) for p in valid_files])
-            drag.setMimeData(mime)
-            result = drag.exec(expected_action)
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setUrls(urls)
+        drag.setMimeData(mime)
+        result = drag.exec(action)
 
-            if stale_files:
-                names = "\n".join(p.name for p in stale_files[:5])
-                QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+        if compress:
+            self._cleanup_temp_zip()
 
-            action = config_manager.get("after_drop_action")
-            if action == "close":
-                self.close()
-            elif action == "clear":
-                self._basket.clear()
-                self._update_display()
-            else:  # keep
-                if result == Qt.DropAction.MoveAction:
-                    for p in valid_files:
-                        if not p.exists():
-                            self._basket.remove(p)
-                self._update_display()
+        if stale_files:
+            names = "\n".join(p.name for p in stale_files[:5])
+            QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+
+        self._apply_after_drop(result, None if compress else valid_files)
+
+    def _apply_after_drop(self, result: Qt.DropAction, tracked_files: list[Path] | None = None) -> None:
+        """Handle after-drop action and optional move bookkeeping."""
+        action = config_manager.get("after_drop_action")
+        if action == "close":
+            self.close()
+        elif action == "clear":
+            self._basket.clear()
+            self._update_display()
+        else:  # keep
+            if tracked_files and result == Qt.DropAction.MoveAction:
+                for p in tracked_files:
+                    if not p.exists():
+                        self._basket.remove(p)
+            self._update_display()
 
     # ------------------------------------------------------------------
     # Display helpers
@@ -477,34 +566,39 @@ class CourierBasketWindow(QWidget):
 
         if self._basket.is_empty:
             self._empty_label.show()
-            self._info_label.setText("")
+            was_expanded = self._expander.is_expanded
+            self._expander.set_count(0)
+            if was_expanded:
+                base_size = self._square_container.height()
+                self.setFixedSize(base_size, base_size)
             return
 
         self._empty_label.hide()
 
         cnt = self._basket.count
-        self._info_label.setText(tr("info.items", count=cnt, size=self._format_size(self._basket.total_size)))
-
         remaining = self._basket.count - _MAX_VISIBLE_FILES
 
         for p, label in self._basket.display_labels(_MAX_VISIBLE_FILES):
             lb = QLabel(label)
+            lb.setObjectName("courier-file-label")
             lb.setToolTip(str(p))
             fl = QFont()
             fl.setPointSize(round(9 * self._font_scale))
             lb.setFont(fl)
-            lb.setStyleSheet("color: rgba(255,255,255,180);")
             self._fl_layout.addWidget(lb)
             self._file_labels.append(lb)
 
         if remaining > 0:
             more = QLabel(tr("basket.more", count=remaining))
+            more.setObjectName("courier-more-label")
             ml = QFont()
             ml.setPointSize(round(9 * self._font_scale))
             more.setFont(ml)
-            more.setStyleSheet("color: rgba(255,255,255,100);")
             self._fl_layout.addWidget(more)
             self._file_labels.append(more)
+
+        self._expander.set_count(cnt)
+        self.setStyleSheet(theme_manager.window_stylesheet())
 
     @staticmethod
     def _format_size(n: int) -> str:
@@ -544,24 +638,7 @@ class CourierBasketWindow(QWidget):
     def _show_menu(self) -> None:
         menu = QMenu(self)
         mfs = round(9 * self._font_scale)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background: rgba(30, 30, 40, 235);
-                border: 1px solid rgba(255,255,255,25);
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            QMenu::item {{
-                color: rgba(255,255,255,180);
-                padding: 6px 20px;
-                border-radius: 4px;
-                font-size: {mfs}pt;
-            }}
-            QMenu::item:selected {{
-                background: rgba(255,255,255,30);
-                color: rgba(255,255,255,255);
-            }}
-        """)
+        menu.setStyleSheet(theme_manager.menu_stylesheet(mfs))
 
         clear_act = QAction(tr("basket.clear"), self)
         clear_act.triggered.connect(self._on_clear)
@@ -595,6 +672,18 @@ class CourierBasketWindow(QWidget):
         self._basket.clear()
         logger.info("Basket cleared | removed=%d", count)
         self._update_display()
+
+    # ------------------------------------------------------------------
+    # Pill button & expand panel
+    # ------------------------------------------------------------------
+
+    def _toggle_expand(self) -> None:
+        base_size = self._square_container.height()
+        self._expander.toggle()
+        if self._expander.is_expanded:
+            self.setFixedSize(base_size, base_size + self._expander.expand_height)
+        else:
+            self.setFixedSize(base_size, base_size)
 
     def closeEvent(self, event) -> None:
         self._cleanup_temp_zip()

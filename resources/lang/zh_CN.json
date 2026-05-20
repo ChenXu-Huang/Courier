@@ -6,6 +6,7 @@
   "basket.more": "还有 {count} 个...",
   "basket.files_missing": "已跳过不存在的文件：\n{names}",
   "basket.compress": "压缩拖出",
+  "basket.file_count": "{count} 个文件",
 
   "tray.new_window": "新建窗口",
   "tray.settings": "设置",
@@ -26,6 +27,10 @@
   "settings.hotkey_placeholder": "macOS 避免使用 caps lock",
   "settings.show_on_startup": "启动时显示窗口",
   "settings.language": "语言",
+  "settings.theme_mode": "主题模式",
+  "settings.theme_mode.auto": "自动（跟随系统）",
+  "settings.theme_mode.dark": "深色",
+  "settings.theme_mode.light": "浅色",
   "settings.invalid_title": "无效设置",
   "settings.validate_hotkey_empty": "快捷键不能为空",
 

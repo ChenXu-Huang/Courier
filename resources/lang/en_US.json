@@ -6,6 +6,7 @@
   "basket.more": "+{count} more...",
   "basket.files_missing": "Skipped missing files:\n{names}",
   "basket.compress": "Compress on drag",
+  "basket.file_count": "{count} files",
 
   "tray.new_window": "New Window",
   "tray.settings": "Settings",
@@ -26,6 +27,10 @@
   "settings.hotkey_placeholder": "avoid caps lock on macOS",
   "settings.show_on_startup": "Show window on startup",
   "settings.language": "Language",
+  "settings.theme_mode": "Theme",
+  "settings.theme_mode.auto": "Auto (follow system)",
+  "settings.theme_mode.dark": "Dark",
+  "settings.theme_mode.light": "Light",
   "settings.invalid_title": "Invalid Settings",
   "settings.validate_hotkey_empty": "The hotkey cannot be empty",
 

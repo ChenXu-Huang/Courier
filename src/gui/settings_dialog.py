@@ -115,6 +115,12 @@ def _validate_hotkey(w: QLineEdit) -> str | None:
 
 _FIELDS: list[FieldSpec[Any]] = [
     FieldSpec.checkbox("show_on_startup", "settings.show_on_startup"),
+    FieldSpec.combo(
+        "theme_mode", "settings.theme_mode",
+        ("settings.theme_mode.auto", "auto"),
+        ("settings.theme_mode.dark", "dark"),
+        ("settings.theme_mode.light", "light"),
+    ),
     FieldSpec.int_spin("window_size", "settings.window_size", 200, 600, 10),
     FieldSpec.float_spin("window_opacity", "settings.window_opacity", 0.1, 1.0, 0.05, 2),
     FieldSpec.int_spin("window_radius", "settings.corner_radius", 0, 50),
