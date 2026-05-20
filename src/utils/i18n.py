@@ -59,9 +59,7 @@ class I18n:
         return text.format_map(kwargs) if kwargs else text
 
     def available(self) -> list[tuple[str, str]]:
-        preferred = [k for k in ("zh_CN", "en_US", "ja_JP") if k in self._strings]
-        other = sorted(k for k in self._strings if k not in preferred)
-        keys = ["auto"] + preferred + other
+        keys = ["auto"] + sorted(self._strings)
         return [(k, self.tr(f"lang.{k}")) for k in keys]
 
 
