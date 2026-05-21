@@ -7,10 +7,11 @@ import uuid
 import zipfile
 from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
-from PySide6.QtGui import QAction, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QAction, QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget, QGridLayout, QScrollArea
 
-from .._meta import IS_MACOS, IS_WINDOWS
+from .._meta import IS_MACOS, IS_WINDOWS, RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket
@@ -19,109 +20,305 @@ from .theme import theme_manager
 
 logger = get_logger(__name__)
 
-_EXPAND_PANEL_HEIGHT = 160
-_HEADER_RATIO = 0.15
-_FOOTER_RATIO = 0.15
-_MAX_VISIBLE_FILES = 8
 
+class _ThumbnailWidget(QWidget):
+    """Renders the actual image thumbnail or SVG placeholder."""
 
-class _ExpandFooter:
-    """Manages the collapsible footer pill button and expand panel."""
+    _IMAGE_EXTS = frozenset({
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+        ".svg", ".ico", ".tiff", ".tif", ".avif",
+    })
 
-    def __init__(self, base_size: int, font_scale: float, parent: QWidget | None = None) -> None:
+    def __init__(self, path: Path, font_scale: float, blank_renderer: QSvgRenderer, card_size: int, parent=None):
+        super().__init__(parent)
+        self._path = path
         self._font_scale = font_scale
-        self._expanded = False
-        self._count = 0
+        self._blank_renderer = blank_renderer
+        self.setFixedSize(card_size, card_size)
 
-        # -- Footer widget --
-        self._footer = QWidget(parent)
-        self._footer.setObjectName("courier-footer")
-        self._footer.setFixedHeight(int(base_size * _FOOTER_RATIO))
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # -- Icons --
-        self._chevron_down = theme_manager.chevron_down_icon
-        self._chevron_up = theme_manager.chevron_up_icon
+        size = self.width()
+        icon_size = int(size * 0.8)
+        margin = (size - icon_size) / 2
 
-        # -- Pill button --
-        self._pill_btn = QPushButton(self._footer)
-        self._pill_btn.setObjectName("courier-pill-btn")
-        self._pill_btn.setIcon(self._chevron_down)
-        self._pill_btn.setIconSize(QSize(14, 14))
-        self._pill_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self._pill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pill_btn.setFixedHeight(30)
-        pf = QFont()
-        pf.setPointSize(round(10 * font_scale))
-        self._pill_btn.setFont(pf)
-        self._pill_btn.hide()
-
-        fl = QHBoxLayout(self._footer)
-        fl.setContentsMargins(0, 0, 0, 0)
-        fl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        fl.addWidget(self._pill_btn)
-
-        # -- Expand panel --
-        self._panel = QWidget(parent)
-        self._panel.setObjectName("courier-expand-panel")
-        self._panel.setFixedHeight(_EXPAND_PANEL_HEIGHT)
-        self._panel.hide()
-
-    # ------------------------------------------------------------------
-    # Accessors
-    # ------------------------------------------------------------------
-
-    @property
-    def footer(self) -> QWidget:
-        return self._footer
-
-    @property
-    def panel(self) -> QWidget:
-        return self._panel
-
-    @property
-    def pill(self) -> QPushButton:
-        return self._pill_btn
-
-    @property
-    def is_expanded(self) -> bool:
-        return self._expanded
-
-    @property
-    def expand_height(self) -> int:
-        return _EXPAND_PANEL_HEIGHT
-
-    # ------------------------------------------------------------------
-    # State
-    # ------------------------------------------------------------------
-
-    def set_count(self, count: int) -> None:
-        """Update visible state according to staged file count."""
-        self._count = count
-        if count == 0:
-            if self._expanded:
-                self._expanded = False
-                self._panel.hide()
-                self._pill_btn.setIcon(self._chevron_down)
-            self._pill_btn.hide()
+        if self._path.suffix.lower() in self._IMAGE_EXTS:
+            # Image thumbnail (no background)
+            pix = QPixmap(str(self._path))
+            if not pix.isNull():
+                scaled = pix.scaled(
+                    icon_size, icon_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                px = (size - scaled.width()) / 2
+                py = (size - scaled.height()) / 2
+                painter.drawPixmap(int(px), int(py), scaled)
         else:
-            self._pill_btn.setText(tr("basket.file_count", count=count))
-            self._pill_btn.show()
+            # Blank-file.svg with extension badge
+            pix = QPixmap(icon_size, icon_size)
+            pix.fill(Qt.GlobalColor.transparent)
+            ip = QPainter(pix)
+            self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
+            ip.end()
+            painter.drawPixmap(int(margin), int(margin), pix)
 
-    def toggle(self) -> None:
-        """Flip expanded / collapsed."""
-        self._expanded = not self._expanded
-        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
-        self._panel.setVisible(self._expanded)
+            ext = self._path.suffix[1:].upper() or "?"
+            f = QFont()
+            f.setPointSize(round(icon_size * 0.14))
+            painter.setFont(f)
+            painter.setPen(QColor(100, 110, 140))
+            text_rect = QRectF(
+                margin + 4,
+                margin + icon_size * 0.62,
+                icon_size - 8,
+                icon_size * 0.35,
+            )
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, ext)
 
-    def refresh_icons(self) -> None:
-        """Recreate icons with current theme colour."""
-        self._chevron_down = theme_manager.chevron_down_icon
-        self._chevron_up = theme_manager.chevron_up_icon
-        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
+
+class _FileGridItem(QWidget):
+    """A single file thumbnail card with its filename below."""
+
+    def __init__(self, path: Path, font_scale: float, blank_renderer: QSvgRenderer, card_size: int, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(card_size)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)  # gap between thumbnail and label
+
+        # 1. Thumbnail
+        self.thumb = _ThumbnailWidget(path, font_scale, blank_renderer, card_size)
+        layout.addWidget(self.thumb, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # 2. Filename label
+        self.label = QLabel()
+        self.label.setObjectName("courier-file-label")  # mount theme color from theme.py
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        f = QFont()
+        f.setPointSize(round(9 * font_scale))
+        self.label.setFont(f)
+
+        # Elide middle for long filenames (e.g. "very_long_file...name.pdf")
+        metrics = self.label.fontMetrics()
+        elided_text = metrics.elidedText(path.name, Qt.TextElideMode.ElideMiddle, card_size)
+        self.label.setText(elided_text)
+        self.label.setToolTip(path.name)  # shows full filename on hover
+
+        layout.addWidget(self.label)
+
+
+class _FileGridWindow(QWidget):
+    """An expanded floating window displaying files in a responsive grid."""
+
+    def __init__(self, files: list[Path], font_scale: float, blank_renderer: QSvgRenderer, card_size: int, radius: int, parent=None):
+        super().__init__(parent)
+        self._radius = radius
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        grid = QGridLayout(content)
+        grid.setSpacing(10)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        N = len(files)
+        if N == 1:
+            cols, vis_rows = 1, 1
+        elif N == 2:
+            cols, vis_rows = 2, 1
+        elif N in (3, 4):
+            cols, vis_rows = 2, 2
+        else:
+            cols, vis_rows = 3, 2
+
+        for i, path in enumerate(files):
+            item = _FileGridItem(path, font_scale, blank_renderer, card_size)
+            r, c = divmod(i, cols)
+            grid.addWidget(item, r, c)
+
+        self.scroll_area.setWidget(content)
+        layout.addWidget(self.scroll_area)
+
+        # Calculate exact window size based on grid parameters
+        dummy_f = QFont()
+        dummy_f.setPointSize(round(9 * font_scale))
+        from PySide6.QtGui import QFontMetrics
+        label_h = QFontMetrics(dummy_f).height()
+        
+        item_w = card_size
+        item_h = card_size + 4 + label_h
+
+        win_w = cols * item_w + (cols - 1) * 10 + 30  # 30 = left + right margins
+        win_h = vis_rows * item_h + (vis_rows - 1) * 10 + 30 # 30 = top + bottom margins
+        self.setFixedSize(win_w, win_h)
+        self.setStyleSheet(theme_manager.window_stylesheet())
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, self._radius, self._radius)
+
+        painter.setPen(QPen(theme_manager.border_color(), 1))
+        painter.fillPath(path, theme_manager.bg_color())
+        painter.drawPath(path)
+
+
+class _FileStackWidget(QWidget):
+    """Draws files as stacked cards — blank placeholders for older files,
+    real thumbnail for the most recent file."""
+
+    _MAX_BLANK = 4
+    _STACK_OFFSET_X = 10
+    _STACK_OFFSET_Y = 6
+    _IMAGE_EXTS = frozenset({
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+        ".svg", ".ico", ".tiff", ".tif", ".avif",
+    })  # fmt: skip
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._files: list[Path] = []
+        self._empty_text = ""
+        self._font_scale = 1.0
+        self._blank_renderer = QSvgRenderer(str(RESOURCES_DIR / "icons" / "blank-file.svg"))
+
+    def set_files(self, files: list[Path]) -> None:
+        self._files = list(files)
+        self.update()
+
+    def set_empty_text(self, text: str) -> None:
+        self._empty_text = text
+
+    def set_font_scale(self, scale: float) -> None:
+        self._font_scale = scale
+
+    # ------------------------------------------------------------------
+    # Paint
+    # ------------------------------------------------------------------
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if not self._files:
+            self._draw_empty(painter)
+            return
+
+        w, h = self.width(), self.height()
+        window_size = int(config_manager.get("window_size"))
+        card_size = min(window_size * 0.5, 160)
+        radius = max(9, card_size * 0.1)
+
+        blanks = self._files[:-1]
+        blank_count = min(len(blanks), self._MAX_BLANK)
+        blank_start = max(0, len(blanks) - blank_count)
+
+        cx, cy = w / 2, h / 2
+        rx = cx - card_size / 2 + max(blank_count - 1, 0) * self._STACK_OFFSET_X / 2
+        ry = cy - card_size / 2 + max(blank_count - 1, 0) * self._STACK_OFFSET_Y / 2
+
+        # Draw blank cards from deepest to nearest
+        for i in range(blank_count):
+            depth = blank_count - i
+            bx = rx - depth * self._STACK_OFFSET_X
+            by = ry - depth * self._STACK_OFFSET_Y
+            self._draw_blank(painter, bx, by, card_size, radius, blanks[blank_start + i])
+
+        # Draw latest file card on top
+        self._draw_file_card(painter, rx, ry, card_size, radius, self._files[-1])
+
+    def _draw_empty(self, painter: QPainter) -> None:
+        if not self._empty_text:
+            return
+        painter.setPen(QColor(160, 160, 160))
+        f = QFont()
+        f.setPointSize(round(10 * self._font_scale))
+        painter.setFont(f)
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._empty_text)
+
+    def _draw_blank(self, painter: QPainter, x: float, y: float, size: float, radius: float, path: Path) -> None:
+        icon_size = int(size * 0.8)
+        pix = QPixmap(icon_size, icon_size)
+        pix.fill(Qt.GlobalColor.transparent)
+        ip = QPainter(pix)
+        self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
+        ip.end()
+        px = x + (size - icon_size) / 2
+        py = y + (size - icon_size) / 2
+        painter.drawPixmap(int(px), int(py), pix)
+
+    def _draw_file_card(self, painter: QPainter, x: float, y: float, size: float, radius: float, path: Path) -> None:
+        icon_size = int(size * 0.8)
+        margin = (size - icon_size) / 2
+
+        if path.suffix.lower() in self._IMAGE_EXTS:
+            # Image thumbnail (no background)
+            pix = QPixmap(str(path))
+            if not pix.isNull():
+                scaled = pix.scaled(
+                    icon_size, icon_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                px = x + (size - scaled.width()) / 2
+                py = y + (size - scaled.height()) / 2
+                painter.drawPixmap(int(px), int(py), scaled)
+        else:
+            # Blank-file.svg with extension badge at bottom-right
+            pix = QPixmap(icon_size, icon_size)
+            pix.fill(Qt.GlobalColor.transparent)
+            ip = QPainter(pix)
+            self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
+            ip.end()
+            painter.drawPixmap(int(x + margin), int(y + margin), pix)
+
+            ext = path.suffix[1:].upper() or "?"
+            f = QFont()
+            f.setPointSize(round(icon_size * 0.14))
+            painter.setFont(f)
+            painter.setPen(QColor(100, 110, 140))
+            text_rect = QRectF(
+                x + margin + 4,
+                y + margin + icon_size * 0.62,
+                icon_size - 8,
+                icon_size * 0.35,
+            )
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, ext)
 
 
 class CourierBasketWindow(QWidget):
     """A square, always-on-top, frameless window for staging file transfers."""
+
+    _HEADER_RATIO = 0.15
+    _FOOTER_RATIO = 0.15
 
     def __init__(self) -> None:
         super().__init__()
@@ -130,8 +327,9 @@ class CourierBasketWindow(QWidget):
         self._basket = FileBasket()
         self._drag_start_pos: QPoint | None = None
         self._drag_out_started = False
-        self._file_labels: list[QLabel] = []
         self._temp_zip: Path | None = None
+        self._expanded = False
+        self._grid_window: _FileGridWindow | None = None
 
         self._setup_window()
         self._create_ui()
@@ -162,11 +360,17 @@ class CourierBasketWindow(QWidget):
     def _apply_opacity(self) -> None:
         opacity = float(config_manager.get("window_opacity"))
         self.setWindowOpacity(opacity)
+        if self._grid_window:
+            self._grid_window.setWindowOpacity(opacity)
         logger.debug("Opacity applied | opacity=%.2f", opacity)
 
     def _apply_theme_stylesheet(self) -> None:
         self._radius = int(config_manager.get("window_radius"))
         self.setStyleSheet(theme_manager.window_stylesheet())
+        if self._grid_window:
+            self._grid_window._radius = self._radius
+            self._grid_window.setStyleSheet(theme_manager.window_stylesheet())
+            self._grid_window.update()
         self.update()
         logger.debug("Theme stylesheet applied | radius=%d", self._radius)
 
@@ -181,7 +385,9 @@ class CourierBasketWindow(QWidget):
         self._title_close_btn.setIcon(self._close_icon)
         self._menu_icon = theme_manager.menu_icon
         self._menu_btn.setIcon(self._menu_icon)
-        self._expander.refresh_icons()
+        self._chevron_down = theme_manager.chevron_down_icon
+        self._chevron_up = theme_manager.chevron_up_icon
+        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
 
     @property
     def _font_scale(self) -> float:
@@ -196,16 +402,7 @@ class CourierBasketWindow(QWidget):
         return max(0.8, min(3.0, dpi / 96.0))  # Windows / Linux: baseline 96 DPI
 
     def _enforce_macos_topmost(self) -> bool:
-        """Float the window above all others via the Objective-C runtime.
-
-        Uses ``method_getImplementation`` to get plain C function pointers
-        (IMP) for each ObjC message, then calls them through
-        ``ctypes.CFUNCTYPE``.  This avoids ``objc_msgSend``, which is an
-        assembly trampoline whose ABI is incompatible with libffi on arm64.
-
-        Returns ``True`` on success, ``False`` if the NSWindow could not
-        be configured (so callers can decide whether to cache the result).
-        """
+        """Float the window above all others via the Objective-C runtime."""
         import ctypes
         from ctypes import c_bool, c_char_p, c_long, c_void_p, c_ulong
 
@@ -224,7 +421,6 @@ class CourierBasketWindow(QWidget):
             ns_view_cls = objc.objc_getClass(b"NSView")
             ns_window_cls = objc.objc_getClass(b"NSWindow")
 
-            # --- Get NSWindow from NSView using IMP (regular C func) ---
             sel_window = objc.sel_registerName(b"window")
             imp_window = objc.method_getImplementation(objc.class_getInstanceMethod(ns_view_cls, sel_window))
             get_window = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p)(imp_window)
@@ -233,19 +429,16 @@ class CourierBasketWindow(QWidget):
                 logger.warning("Failed to obtain NSWindow via ctypes")
                 return False
 
-            # --- setLevel: via IMP ---
             sel_level = objc.sel_registerName(b"setLevel:")
             imp_level = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_level))
             set_level = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_long)(imp_level)
             set_level(ns_window, sel_level, 3)
 
-            # --- setHidesOnDeactivate: via IMP ---
             sel_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
             imp_hides = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_hides))
             set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
             set_hides(ns_window, sel_hides, False)
 
-            # --- setCollectionBehavior: via IMP ---
             sel_behavior = objc.sel_registerName(b"setCollectionBehavior:")
             imp_behavior = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_behavior))
             set_behavior = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_ulong)(imp_behavior)
@@ -258,23 +451,9 @@ class CourierBasketWindow(QWidget):
             return False
 
     def _suppress_dwm_rounding(self) -> bool:
-        """Disable Windows 11 DWM automatic corner rounding for this window.
-
-        When ``WA_TranslucentBackground`` is active, the DWM clips the window
-        with its own rounded corners (≈ 8–10 px radius on Windows 11).  That
-        clip outline appears as a thin arc *outside* the painted round-rect,
-        producing a ghost border at a smaller radius than ``window_radius``.
-        Setting ``DWMWA_WINDOW_CORNER_PREFERENCE`` to ``DWMWCP_DONOTROUND``
-        (1) disables the DWM rounding entirely, so that only the radius
-        painted in :meth:`paintEvent` is visible.
-
-        Returns ``True`` on success, ``False`` if the attribute could not be
-        set (e.g. Windows 10 where the attribute is a no-op, or when running
-        on a non-Windows platform where ``windll`` is unavailable).
-        """
+        """Disable Windows 11 DWM automatic corner rounding for this window."""
         import ctypes
 
-        # Defined in <dwmapi.h> — present since Windows 11 Build 22000.
         _DWMWA_WINDOW_CORNER_PREFERENCE = 33
         _DWMWCP_DONOTROUND = 1
 
@@ -287,7 +466,7 @@ class CourierBasketWindow(QWidget):
                 ctypes.byref(preference),
                 ctypes.sizeof(preference),
             )
-            if result != 0:  # S_OK == 0
+            if result != 0:
                 logger.debug(
                     "DWM corner suppression returned HRESULT=0x%08X",
                     result & 0xFFFFFFFF,
@@ -317,7 +496,7 @@ class CourierBasketWindow(QWidget):
         # -- Header (transparent — enables window drag) --
         self._header = QWidget()
         self._header.setObjectName("courier-header")
-        self._header.setFixedHeight(int(base_size * _HEADER_RATIO))
+        self._header.setFixedHeight(int(base_size * self._HEADER_RATIO))
         self._header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         hl = QHBoxLayout(self._header)
         hl.setContentsMargins(44, 0, 44, 0)
@@ -337,7 +516,7 @@ class CourierBasketWindow(QWidget):
 
         hl.addLayout(header_text_col)
 
-        # -- X close button (direct child of window, overlaid at top-right) --
+        # -- X close button --
         self._close_icon = theme_manager.close_icon
 
         self._title_close_btn = QPushButton(self)
@@ -366,35 +545,46 @@ class CourierBasketWindow(QWidget):
         self._menu_btn.setGeometry(margin, margin, btn_size, btn_size)
         self._menu_btn.clicked.connect(self._show_menu)
 
-        # -- File list --
-        self._file_list = QWidget()
-        self._file_list.setObjectName("courier-file-list")
-        self._file_list.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._fl_layout = QVBoxLayout(self._file_list)
-        self._fl_layout.setContentsMargins(20, 4, 20, 4)
-        self._fl_layout.setSpacing(3)
-        self._fl_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # -- File stack (cards) --
+        self._file_stack = _FileStackWidget()
+        self._file_stack.setObjectName("courier-file-list")
+        self._file_stack.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._file_stack.set_empty_text(tr("basket.empty_hint"))
+        self._file_stack.set_font_scale(self._font_scale)
 
-        self._empty_label = QLabel(tr("basket.empty_hint"))
-        self._empty_label.setObjectName("courier-empty-label")
-        ef = QFont()
-        ef.setPointSize(round(10 * self._font_scale))
-        self._empty_label.setFont(ef)
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._fl_layout.addWidget(self._empty_label)
+        # -- Footer with pill button --
+        self._footer = QWidget()
+        self._footer.setObjectName("courier-footer")
+        self._footer.setFixedHeight(int(base_size * self._FOOTER_RATIO))
 
-        # -- Footer & expand panel (managed by _ExpandFooter) --
-        self._expander = _ExpandFooter(base_size, self._font_scale, self)
-        self._expander.pill.clicked.connect(self._toggle_expand)
+        self._chevron_down = theme_manager.chevron_down_icon
+        self._chevron_up = theme_manager.chevron_up_icon
+
+        self._pill_btn = QPushButton(self._footer)
+        self._pill_btn.setObjectName("courier-pill-btn")
+        self._pill_btn.setIcon(self._chevron_down)
+        self._pill_btn.setIconSize(QSize(14, 14))
+        self._pill_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self._pill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pill_btn.setFixedHeight(30)
+        pf = QFont()
+        pf.setPointSize(round(10 * self._font_scale))
+        self._pill_btn.setFont(pf)
+        self._pill_btn.hide()
+        self._pill_btn.clicked.connect(self._toggle_expand)
+
+        fl = QHBoxLayout(self._footer)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fl.addWidget(self._pill_btn)
 
         # -- Assemble square container --
         square_layout.addWidget(self._header)
-        square_layout.addWidget(self._file_list, 1)
-        square_layout.addWidget(self._expander.footer)
+        square_layout.addWidget(self._file_stack, 1)
+        square_layout.addWidget(self._footer)
 
         # -- Assemble window --
         layout.addWidget(self._square_container)
-        layout.addWidget(self._expander.panel)
 
         # Re-raise buttons so they stack above the container widgets
         self._title_close_btn.raise_()
@@ -420,7 +610,6 @@ class CourierBasketWindow(QWidget):
     # Drag-in (accept files from external)
     # ------------------------------------------------------------------
 
-    # Show event — platform-specific one-time fixups
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if IS_MACOS and not getattr(self, "_macos_level_set", False):
@@ -481,11 +670,13 @@ class CourierBasketWindow(QWidget):
             return
 
         y = self._drag_start_pos.y()
-        header_h = int(self.height() * _HEADER_RATIO)
+        header_h = int(self.height() * self._HEADER_RATIO)
 
         if y < header_h or self._basket.is_empty:
             # Drag from header or empty basket → move window
             self.move(event.globalPosition().toPoint() - self._drag_start_pos)
+            if self._expanded:  # Auto-close expanded grid on window move
+                self._toggle_expand()
         else:
             # Drag from file area with files → start file drag-out
             self._drag_out_started = True
@@ -562,48 +753,27 @@ class CourierBasketWindow(QWidget):
 
     def _retranslate_ui(self) -> None:
         self._title_label.setText(tr("app.name"))
-        self._empty_label.setText(tr("basket.empty_hint"))
+        self._file_stack.set_empty_text(tr("basket.empty_hint"))
         self._update_display()
 
     def _update_display(self) -> None:
-        for lb in self._file_labels:
-            lb.deleteLater()
-        self._file_labels.clear()
-
-        if self._basket.is_empty:
-            self._empty_label.show()
-            was_expanded = self._expander.is_expanded
-            self._expander.set_count(0)
-            if was_expanded:
-                base_size = self._square_container.height()
-                self.setFixedSize(base_size, base_size)
-            return
-
-        self._empty_label.hide()
-
+        self._file_stack.set_files(self._basket.files)
         cnt = self._basket.count
-        remaining = self._basket.count - _MAX_VISIBLE_FILES
 
-        for p, label in self._basket.display_labels(_MAX_VISIBLE_FILES):
-            lb = QLabel(label)
-            lb.setObjectName("courier-file-label")
-            lb.setToolTip(str(p))
-            fl = QFont()
-            fl.setPointSize(round(9 * self._font_scale))
-            lb.setFont(fl)
-            self._fl_layout.addWidget(lb)
-            self._file_labels.append(lb)
+        if self._expanded:
+            # Auto-close the grid window if the basket state updates (prevent stale grids)
+            self._expanded = False
+            self._pill_btn.setIcon(self._chevron_down)
+            if self._grid_window:
+                self._grid_window.close()
+                self._grid_window = None
 
-        if remaining > 0:
-            more = QLabel(tr("basket.more", count=remaining))
-            more.setObjectName("courier-more-label")
-            ml = QFont()
-            ml.setPointSize(round(9 * self._font_scale))
-            more.setFont(ml)
-            self._fl_layout.addWidget(more)
-            self._file_labels.append(more)
+        if cnt == 0:
+            self._pill_btn.hide()
+        else:
+            self._pill_btn.setText(tr("basket.file_count", count=cnt))
+            self._pill_btn.show()
 
-        self._expander.set_count(cnt)
         self.setStyleSheet(theme_manager.window_stylesheet())
 
     @staticmethod
@@ -680,18 +850,53 @@ class CourierBasketWindow(QWidget):
         self._update_display()
 
     # ------------------------------------------------------------------
-    # Pill button & expand panel
+    # Pill button
     # ------------------------------------------------------------------
 
     def _toggle_expand(self) -> None:
-        base_size = self._square_container.height()
-        self._expander.toggle()
-        if self._expander.is_expanded:
-            self.setFixedSize(base_size, base_size + self._expander.expand_height)
+        if self._basket.is_empty:
+            return
+
+        self._expanded = not self._expanded
+        self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
+
+        if self._expanded:
+            window_size = int(config_manager.get("window_size"))
+            card_size = int(min(window_size * 0.5, 160))
+            
+            self._grid_window = _FileGridWindow(
+                files=self._basket.files,
+                font_scale=self._font_scale,
+                blank_renderer=self._file_stack._blank_renderer,
+                card_size=card_size,
+                radius=self._radius,
+            )
+            self._grid_window.setWindowOpacity(self.windowOpacity())
+            
+            # Anchor below the main window
+            geo = self.geometry()
+            gw_w = self._grid_window.width()
+            x = geo.center().x() - gw_w // 2
+            y = geo.bottom() + 10
+            self._grid_window.move(x, y)
+            
+            # Match top-most hacks for OS consistency
+            if IS_MACOS and getattr(self, "_macos_level_set", False):
+                self._grid_window._enforce_macos_topmost = self._enforce_macos_topmost.__get__(self._grid_window)
+                self._grid_window._enforce_macos_topmost()
+            elif IS_WINDOWS and getattr(self, "_dwm_rounding_suppressed", False):
+                self._grid_window._suppress_dwm_rounding = self._suppress_dwm_rounding.__get__(self._grid_window)
+                self._grid_window._suppress_dwm_rounding()
+                
+            self._grid_window.show()
         else:
-            self.setFixedSize(base_size, base_size)
+            if self._grid_window:
+                self._grid_window.close()
+                self._grid_window = None
 
     def closeEvent(self, event) -> None:
+        if self._grid_window:
+            self._grid_window.close()
         self._cleanup_temp_zip()
         logger.debug("Window closed")
         event.accept()

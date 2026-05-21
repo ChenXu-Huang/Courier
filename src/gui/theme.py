@@ -61,9 +61,6 @@ class ThemePalette:
     pill_btn_hover_bg: _RGBA
     pill_btn_hover_color: _RGBA
 
-    # Expand panel separator
-    panel_border_top: _RGBA
-
     # Context menu (QMenu)
     menu_bg: _RGBA
     menu_border: _RGBA
@@ -115,9 +112,6 @@ class ThemePalette:
                 background: {self._rgba(self.pill_btn_hover_bg)};
                 color: {self._rgba(self.pill_btn_hover_color)};
             }}
-            #courier-expand-panel {{
-                border-top: 1px solid {self._rgba(self.panel_border_top)};
-            }}
         """.strip()
 
     def menu_stylesheet(self, font_size: int) -> str:
@@ -161,7 +155,6 @@ class ThemePalette:
             pill_btn_color=(255, 255, 255, 180),
             pill_btn_hover_bg=(255, 255, 255, 40),
             pill_btn_hover_color=(255, 255, 255, 255),
-            panel_border_top=(255, 255, 255, 15),
             menu_bg=(30, 30, 40, 235),
             menu_border=(255, 255, 255, 25),
             menu_item_color=(255, 255, 255, 180),
@@ -188,7 +181,6 @@ class ThemePalette:
             pill_btn_color=(0, 0, 0, 180),
             pill_btn_hover_bg=(0, 0, 0, 20),
             pill_btn_hover_color=(0, 0, 0, 255),
-            panel_border_top=(0, 0, 0, 12),
             menu_bg=(245, 245, 250, 240),
             menu_border=(0, 0, 0, 25),
             menu_item_color=(0, 0, 0, 180),

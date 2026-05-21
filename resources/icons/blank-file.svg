@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- Document body with rounded corners -->
+  <path d="M60 16 L166 16 L208 58 L208 228 A12 12 0 0 1 196 240 L60 240 A12 12 0 0 1 48 228 L48 28 A12 12 0 0 1 60 16 Z" fill="white" stroke="#D0D0D5" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Folded corner triangle -->
+  <path d="M166 16 V58 H208 L166 16 Z" fill="#F0F0F2" stroke="#D0D0D5" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Text lines -->
+  <rect x="68" y="104" width="120" height="6" rx="3" fill="#E0E0E4"/>
+  <rect x="68" y="136" width="96" height="6" rx="3" fill="#E0E0E4"/>
+  <rect x="68" y="168" width="108" height="6" rx="3" fill="#E0E0E4"/>
+  <rect x="68" y="200" width="56" height="6" rx="3" fill="#E0E0E4"/>
+</svg>
