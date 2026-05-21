@@ -6,16 +6,16 @@
 #    nuitka-project: --macos-sign-identity=ad-hoc
 #    nuitka-project: --macos-app-mode=ui-element
 #    nuitka-project: --macos-app-name=Courier
-#    nuitka-project: --macos-app-icon=none
+#    nuitka-project: --macos-app-icon=dist/icon/icon.icns
 
 # nuitka-project-if: {OS} == "Windows":
 #    nuitka-project: --mode=standalone
 #    nuitka-project: --windows-console-mode=disable
-# --windows-icon-from-ico=resources/icon.ico
+#    nuitka-project: --windows-icon-from-ico=dist/icon/icon.ico
 
 # nuitka-project-if: {OS} in ("Linux", "FreeBSD"):
 #    nuitka-project: --mode=standalone
-# --linux-icon=resources/icon.png
+#    nuitka-project: --linux-icon=dist/icon/icon-256.png
 
 # nuitka-project: --deployment
 # nuitka-project: --assume-yes-for-downloads

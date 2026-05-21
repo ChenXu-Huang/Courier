@@ -6,6 +6,27 @@ on:
     tags: ["v*"]
 
 jobs:
+  generate-icons:
+    name: Generate platform icons
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          python-version: "3.13"
+
+      - name: Generate all icon formats
+        run: uv run --script build/setup_icon.py --svg resources/icons/courier.svg --output dist/icon --all
+
+      - name: Upload icons artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-icons
+          path: dist/icon/
+          retention-days: 1
+
   build:
     name: Build on ${{ matrix.os-short }}
     strategy:
@@ -19,6 +40,7 @@ jobs:
             os-short: macos
       fail-fast: false
 
+    needs: generate-icons
     runs-on: ${{ matrix.os }}
 
     defaults:
@@ -36,6 +58,12 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: build-icons
+          path: dist/icon/
 
       - name: Extract metadata
         run: |
