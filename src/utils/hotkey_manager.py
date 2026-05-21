@@ -119,6 +119,7 @@ class CourierHotkeyManager(QObject):
         self._caps_lock_was_pressed = False
         self._suppress_caps = 0
         self._last_synthetic_time = 0.0
+        self._paused = False
 
     @property
     def hotkey(self) -> str:
@@ -155,6 +156,16 @@ class CourierHotkeyManager(QObject):
             self._caps_lock_was_pressed = False
             self._suppress_caps = 0
 
+    def pause(self) -> None:
+        self._paused = True
+        self._pressed.clear()
+        with self._caps_lock_lock:
+            self._caps_lock_was_pressed = False
+            self._suppress_caps = 0
+
+    def resume(self) -> None:
+        self._paused = False
+
     def _on_hotkey_changed(self, path: str, old: str, new: str) -> None:
         """Update the hotkey object. Listener restart is managed externally
         (by the settings-close handler) since pynput's macOS Listener
@@ -188,7 +199,7 @@ class CourierHotkeyManager(QObject):
 
     def _on_press(self, key: Key | KeyCode | None) -> None:
         """Called from the pynput listener thread on each key press."""
-        if key is None:
+        if key is None or self._paused:
             return
 
         if key == Key.caps_lock:
@@ -207,7 +218,7 @@ class CourierHotkeyManager(QObject):
 
     def _on_release(self, key: Key | KeyCode | None) -> None:
         """Called from the pynput listener thread on each key release."""
-        if key is None:
+        if key is None or self._paused:
             return
         self._pressed.discard(key)
 

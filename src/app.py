@@ -7,7 +7,7 @@ from .logger import LoggerManager, LoggerConfig
 
 _LOG_CONFIG = LoggerConfig(
     name=APP_NAME.lower(),
-    level="INFO",
+    level="DEBUG",
     log_dir=LOG_DIR,
     console=False,
     console_color=False,
@@ -49,16 +49,13 @@ def launch_gui() -> int:
     # --- Global hotkey ---
     hotkey = CourierHotkeyManager()
     hotkey.hotkey_triggered.connect(
-        lambda: tray.create_new_window_at(
-            QCursor.pos().x() - config_manager.get("window_size") // 2,
-            QCursor.pos().y() - config_manager.get("window_size") // 2,
-        )
+        lambda: tray.create_new_window_at(QCursor.pos().x(), QCursor.pos().y())
     )
     hotkey.start()
     logger.info("Global hotkey registered | hotkey=%s", hotkey.hotkey)
 
-    tray.settings_about_to_open.connect(hotkey.stop)
-    tray.settings_closed.connect(hotkey.start)
+    tray.settings_about_to_open.connect(hotkey.pause)
+    tray.settings_closed.connect(hotkey.resume)
 
     logger.info("Courier started successfully")
 

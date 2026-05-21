@@ -84,9 +84,10 @@ class CourierTrayManager(QObject):
         return w
 
     def create_new_window_at(self, x: int, y: int) -> CourierBasketWindow:
-        """Create and show a new basket window at the given screen position."""
+        """Create and show a new basket window centered at the given screen position."""
+        size = config_manager.get("window_size")
         w = self._make_window()
-        w.move(x, y)
+        w.move(x - size // 2, y - size // 2)
         w.show()
         logger.info("New window created at (%d, %d) | windows=%d", x, y, len(self._windows))
         return w
