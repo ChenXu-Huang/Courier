@@ -17,6 +17,89 @@ from .theme import theme_manager
 logger = get_logger(__name__)
 
 
+# ------------------------------------------------------------------
+# Platform-specific window hacks
+# ------------------------------------------------------------------
+
+def _enforce_macos_topmost(window: QWidget) -> bool:
+    """Float the window above all others via the Objective-C runtime."""
+    import ctypes
+    from ctypes import c_bool, c_char_p, c_long, c_void_p, c_ulong
+
+    try:
+        objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
+        objc.sel_registerName.restype = c_void_p
+        objc.sel_registerName.argtypes = [c_char_p]
+        objc.objc_getClass.restype = c_void_p
+        objc.objc_getClass.argtypes = [c_char_p]
+        objc.class_getInstanceMethod.restype = c_void_p
+        objc.class_getInstanceMethod.argtypes = [c_void_p, c_void_p]
+        objc.method_getImplementation.restype = c_void_p
+        objc.method_getImplementation.argtypes = [c_void_p]
+
+        view = c_void_p(int(window.winId()))
+        ns_view_cls = objc.objc_getClass(b"NSView")
+        ns_window_cls = objc.objc_getClass(b"NSWindow")
+
+        sel_window = objc.sel_registerName(b"window")
+        imp_window = objc.method_getImplementation(objc.class_getInstanceMethod(ns_view_cls, sel_window))
+        get_window = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p)(imp_window)
+        ns_window = get_window(view, sel_window)
+        if not ns_window:
+            logger.warning("Failed to obtain NSWindow via ctypes")
+            return False
+
+        sel_level = objc.sel_registerName(b"setLevel:")
+        imp_level = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_level))
+        set_level = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_long)(imp_level)
+        set_level(ns_window, sel_level, 3)
+
+        sel_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
+        imp_hides = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_hides))
+        set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
+        set_hides(ns_window, sel_hides, False)
+
+        sel_behavior = objc.sel_registerName(b"setCollectionBehavior:")
+        imp_behavior = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_behavior))
+        set_behavior = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_ulong)(imp_behavior)
+        set_behavior(ns_window, sel_behavior, 1 | 256 | 1024)
+
+        logger.debug("macOS topmost and multi-space behavior enforced via IMP (safe path)")
+        return True
+    except Exception as exc:
+        logger.warning("macOS topmost ctypes failed: %s", exc)
+        return False
+
+
+def _suppress_dwm_rounding(window: QWidget) -> bool:
+    """Disable Windows 11 DWM automatic corner rounding for this window."""
+    import ctypes
+
+    _DWMWA_WINDOW_CORNER_PREFERENCE = 33
+    _DWMWCP_DONOTROUND = 1
+
+    try:
+        hwnd = ctypes.c_void_p(int(window.winId()))
+        preference = ctypes.c_int(_DWMWCP_DONOTROUND)
+        result = ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
+            hwnd,
+            _DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(preference),
+            ctypes.sizeof(preference),
+        )
+        if result != 0:
+            logger.debug(
+                "DWM corner suppression returned HRESULT=0x%08X",
+                result & 0xFFFFFFFF,
+            )
+            return False
+        logger.debug("DWM automatic corner rounding suppressed")
+        return True
+    except Exception as exc:
+        logger.warning("DwmSetWindowAttribute failed: %s", exc)
+        return False
+
+
 class _ThumbnailWidget(QWidget):
     """Renders the actual image thumbnail or SVG placeholder."""
 
@@ -161,7 +244,7 @@ class _FileGridWindow(QWidget):
         dummy_f.setPointSize(round(9 * font_scale))
         from PySide6.QtGui import QFontMetrics
         label_h = QFontMetrics(dummy_f).height()
-        
+
         item_w = card_size
         item_h = card_size + 4 + label_h
 
@@ -169,6 +252,16 @@ class _FileGridWindow(QWidget):
         win_h = vis_rows * item_h + (vis_rows - 1) * 10 + 30 # 30 = top + bottom margins
         self.setFixedSize(win_w, win_h)
         self.setStyleSheet(theme_manager.window_stylesheet())
+
+    def showEvent(self, event) -> None:
+        """Re-apply platform-specific window hacks after the native window is created."""
+        super().showEvent(event)
+        if IS_MACOS and not getattr(self, "_macos_level_set", False):
+            if _enforce_macos_topmost(self):
+                self._macos_level_set = True
+        elif IS_WINDOWS and not getattr(self, "_dwm_rounding_suppressed", False):
+            if _suppress_dwm_rounding(self):
+                self._dwm_rounding_suppressed = True
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -326,6 +419,7 @@ class CourierBasketWindow(QWidget):
         self._temp_zip: Path | None = None
         self._expanded = False
         self._grid_window: _FileGridWindow | None = None
+        self._pill_btn: QPushButton
 
         self._setup_window()
         self._create_ui()
@@ -396,83 +490,6 @@ class CourierBasketWindow(QWidget):
         if IS_MACOS:  # MacOS: baseline 72 DPI
             return max(1.0, min(3.0, (dpi / 72.0) * 1.2))
         return max(0.8, min(3.0, dpi / 96.0))  # Windows / Linux: baseline 96 DPI
-
-    def _enforce_macos_topmost(self) -> bool:
-        """Float the window above all others via the Objective-C runtime."""
-        import ctypes
-        from ctypes import c_bool, c_char_p, c_long, c_void_p, c_ulong
-
-        try:
-            objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-            objc.sel_registerName.restype = c_void_p
-            objc.sel_registerName.argtypes = [c_char_p]
-            objc.objc_getClass.restype = c_void_p
-            objc.objc_getClass.argtypes = [c_char_p]
-            objc.class_getInstanceMethod.restype = c_void_p
-            objc.class_getInstanceMethod.argtypes = [c_void_p, c_void_p]
-            objc.method_getImplementation.restype = c_void_p
-            objc.method_getImplementation.argtypes = [c_void_p]
-
-            view = c_void_p(int(self.winId()))
-            ns_view_cls = objc.objc_getClass(b"NSView")
-            ns_window_cls = objc.objc_getClass(b"NSWindow")
-
-            sel_window = objc.sel_registerName(b"window")
-            imp_window = objc.method_getImplementation(objc.class_getInstanceMethod(ns_view_cls, sel_window))
-            get_window = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p)(imp_window)
-            ns_window = get_window(view, sel_window)
-            if not ns_window:
-                logger.warning("Failed to obtain NSWindow via ctypes")
-                return False
-
-            sel_level = objc.sel_registerName(b"setLevel:")
-            imp_level = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_level))
-            set_level = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_long)(imp_level)
-            set_level(ns_window, sel_level, 3)
-
-            sel_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
-            imp_hides = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_hides))
-            set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
-            set_hides(ns_window, sel_hides, False)
-
-            sel_behavior = objc.sel_registerName(b"setCollectionBehavior:")
-            imp_behavior = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_behavior))
-            set_behavior = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_ulong)(imp_behavior)
-            set_behavior(ns_window, sel_behavior, 1 | 256 | 1024)
-
-            logger.debug("macOS topmost and multi-space behavior enforced via IMP (safe path)")
-            return True
-        except Exception as exc:
-            logger.warning("macOS topmost ctypes failed: %s", exc)
-            return False
-
-    def _suppress_dwm_rounding(self) -> bool:
-        """Disable Windows 11 DWM automatic corner rounding for this window."""
-        import ctypes
-
-        _DWMWA_WINDOW_CORNER_PREFERENCE = 33
-        _DWMWCP_DONOTROUND = 1
-
-        try:
-            hwnd = ctypes.c_void_p(int(self.winId()))
-            preference = ctypes.c_int(_DWMWCP_DONOTROUND)
-            result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                _DWMWA_WINDOW_CORNER_PREFERENCE,
-                ctypes.byref(preference),
-                ctypes.sizeof(preference),
-            )
-            if result != 0:
-                logger.debug(
-                    "DWM corner suppression returned HRESULT=0x%08X",
-                    result & 0xFFFFFFFF,
-                )
-                return False
-            logger.debug("DWM automatic corner rounding suppressed")
-            return True
-        except Exception as exc:
-            logger.warning("DwmSetWindowAttribute failed: %s", exc)
-            return False
 
     def _create_ui(self) -> None:
         base_size = self.height()
@@ -609,10 +626,10 @@ class CourierBasketWindow(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if IS_MACOS and not getattr(self, "_macos_level_set", False):
-            if self._enforce_macos_topmost():
+            if _enforce_macos_topmost(self):
                 self._macos_level_set = True
         elif IS_WINDOWS and not getattr(self, "_dwm_rounding_suppressed", False):
-            if self._suppress_dwm_rounding():
+            if _suppress_dwm_rounding(self):
                 self._dwm_rounding_suppressed = True
 
     def dragEnterEvent(self, event) -> None:
@@ -832,7 +849,7 @@ class CourierBasketWindow(QWidget):
         if self._expanded:
             window_size = int(config_manager.get("window_size"))
             card_size = int(min(window_size * 0.5, 160))
-            
+
             self._grid_window = _FileGridWindow(
                 files=self._basket.files,
                 font_scale=self._font_scale,
@@ -841,22 +858,14 @@ class CourierBasketWindow(QWidget):
                 radius=self._radius,
             )
             self._grid_window.setWindowOpacity(self.windowOpacity())
-            
+
             # Anchor below the main window
             geo = self.geometry()
             gw_w = self._grid_window.width()
             x = geo.center().x() - gw_w // 2
             y = geo.bottom() + 10
             self._grid_window.move(x, y)
-            
-            # Match top-most hacks for OS consistency
-            if IS_MACOS and getattr(self, "_macos_level_set", False):
-                self._grid_window._enforce_macos_topmost = self._enforce_macos_topmost.__get__(self._grid_window)
-                self._grid_window._enforce_macos_topmost()
-            elif IS_WINDOWS and getattr(self, "_dwm_rounding_suppressed", False):
-                self._grid_window._suppress_dwm_rounding = self._suppress_dwm_rounding.__get__(self._grid_window)
-                self._grid_window._suppress_dwm_rounding()
-                
+
             self._grid_window.show()
         else:
             if self._grid_window:
