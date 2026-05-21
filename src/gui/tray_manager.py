@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger
-from ..utils.i18n import tr, language_changed
+from ..utils import tr, language_changed
 from .basket_window import CourierBasketWindow
 from .settings_dialog import CourierSettingsDialog
 

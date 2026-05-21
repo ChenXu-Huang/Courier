@@ -14,8 +14,7 @@ from PySide6.QtWidgets import (
 
 from ..config import config_manager
 from ..logger import get_logger
-from ..utils.hotkey_manager import Hotkey
-from ..utils.i18n import tr, available_languages, current_language, set_language
+from ..utils import Hotkey, tr, available_languages, current_language, set_language
 
 logger = get_logger(__name__)
 W = TypeVar("W", bound=QWidget)

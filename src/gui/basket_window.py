@@ -1,10 +1,7 @@
 """Square floating window — drag-drop file staging surface."""
 
 import math
-import os
-import tempfile
 import uuid
-import zipfile
 from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtSvg import QSvgRenderer
@@ -14,8 +11,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessage
 from .._meta import IS_MACOS, IS_WINDOWS, RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
-from ..utils import FileBasket
-from ..utils.i18n import tr, language_changed
+from ..utils import FileBasket, cleanup_temp_zip, create_temp_zip, tr, language_changed
 from .theme import theme_manager
 
 logger = get_logger(__name__)
@@ -704,7 +700,7 @@ class CourierBasketWindow(QWidget):
         compress = config_manager.get("compress_on_drag")
 
         if compress:
-            zip_path = self._create_temp_zip(valid_files)
+            zip_path = create_temp_zip(valid_files)
             if zip_path is None:
                 logger.warning("Compression failed, drag-out cancelled")
                 return
@@ -724,7 +720,7 @@ class CourierBasketWindow(QWidget):
         result = drag.exec(action)
 
         if compress:
-            self._cleanup_temp_zip()
+            cleanup_temp_zip(self._temp_zip)
 
         if stale_files:
             names = "\n".join(p.name for p in stale_files[:5])
@@ -783,33 +779,6 @@ class CourierBasketWindow(QWidget):
         units = ["B", "KB", "MB", "GB"]
         idx = min(int(math.log(n, 1024)), len(units) - 1)
         return f"{n / (1024**idx):.1f} {units[idx]}"
-
-    # ------------------------------------------------------------------
-    # Compression helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _create_temp_zip(files: list[Path]) -> Path | None:
-        """Bundle *files* into a temporary zip and return its path."""
-        try:
-            fd, path = tempfile.mkstemp(suffix=".zip", prefix="courier_")
-            os.close(fd)
-
-            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for f in files:
-                    zf.write(f, f.name)
-            return Path(path)
-        except Exception as exc:
-            logger.exception("Failed to create temp zip: %s", exc)
-            return None
-
-    def _cleanup_temp_zip(self) -> None:
-        if self._temp_zip is not None:
-            try:
-                self._temp_zip.unlink(missing_ok=True)
-            except Exception:
-                logger.warning("Failed to clean up temp zip: %s", self._temp_zip)
-            self._temp_zip = None
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
@@ -897,6 +866,6 @@ class CourierBasketWindow(QWidget):
     def closeEvent(self, event) -> None:
         if self._grid_window:
             self._grid_window.close()
-        self._cleanup_temp_zip()
+        cleanup_temp_zip(self._temp_zip)
         logger.debug("Window closed")
         event.accept()
