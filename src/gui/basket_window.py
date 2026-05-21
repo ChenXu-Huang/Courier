@@ -207,7 +207,7 @@ class CourierBasketWindow(QWidget):
         be configured (so callers can decide whether to cache the result).
         """
         import ctypes
-        from ctypes import c_bool, c_char_p, c_long, c_void_p
+        from ctypes import c_bool, c_char_p, c_long, c_void_p, c_ulong
 
         try:
             objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
@@ -245,7 +245,13 @@ class CourierBasketWindow(QWidget):
             set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
             set_hides(ns_window, sel_hides, False)
 
-            logger.debug("macOS topmost enforced via IMP (safe path)")
+            # --- setCollectionBehavior: via IMP ---
+            sel_behavior = objc.sel_registerName(b"setCollectionBehavior:")
+            imp_behavior = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_behavior))
+            set_behavior = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_ulong)(imp_behavior)
+            set_behavior(ns_window, sel_behavior, 1 | 256 | 1024)
+
+            logger.debug("macOS topmost and multi-space behavior enforced via IMP (safe path)")
             return True
         except Exception as exc:
             logger.warning("macOS topmost ctypes failed: %s", exc)
