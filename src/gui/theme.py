@@ -101,17 +101,6 @@ class ThemePalette:
                 background: {self._rgba(self.overlay_btn_hover_bg)};
                 color: {self._rgba(self.overlay_btn_hover_color)};
             }}
-            #courier-pill-btn {{
-                background: {self._rgba(self.pill_btn_bg)};
-                border: 1px solid {self._rgba(self.pill_btn_border)};
-                border-radius: 15px;
-                color: {self._rgba(self.pill_btn_color)};
-                padding: 0 16px;
-            }}
-            #courier-pill-btn:hover {{
-                background: {self._rgba(self.pill_btn_hover_bg)};
-                color: {self._rgba(self.pill_btn_hover_color)};
-            }}
         """.strip()
 
     def menu_stylesheet(self, font_size: int) -> str:

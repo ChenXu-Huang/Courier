@@ -6,107 +6,73 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtGui import QAction, QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget, QGridLayout, QScrollArea
+from PySide6.QtWidgets import (
+    QAbstractButton, QApplication, QHBoxLayout, QLabel,
+    QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QGridLayout, QScrollArea,
+)  # fmt: skip
 
-from .._meta import IS_MACOS, IS_WINDOWS, RESOURCES_DIR
+from .._meta import RESOURCES_DIR
 from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket, cleanup_temp_zip, create_temp_zip, tr, language_changed
+from .platform import PlatformCompatMixin
 from .theme import theme_manager
 
 logger = get_logger(__name__)
 
 
-# ------------------------------------------------------------------
-# Platform-specific window hacks
-# ------------------------------------------------------------------
+_IMAGE_EXTS = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+    ".svg", ".ico", ".tiff", ".tif", ".avif",
+})  # fmt: skip
 
-def _enforce_macos_topmost(window: QWidget) -> bool:
-    """Float the window above all others via the Objective-C runtime."""
-    import ctypes
-    from ctypes import c_bool, c_char_p, c_long, c_void_p, c_ulong
+def _draw_file_thumbnail(
+    painter: QPainter, path: Path, x: float, y: float, size: float,
+    font_scale: float, blank_renderer: QSvgRenderer
+) -> None:
+    """Unified rendering logic: Image thumbnail OR blank svg + extension badge."""
+    icon_size = int(size * 0.8)
+    margin = (size - icon_size) / 2
 
-    try:
-        objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-        objc.sel_registerName.restype = c_void_p
-        objc.sel_registerName.argtypes = [c_char_p]
-        objc.objc_getClass.restype = c_void_p
-        objc.objc_getClass.argtypes = [c_char_p]
-        objc.class_getInstanceMethod.restype = c_void_p
-        objc.class_getInstanceMethod.argtypes = [c_void_p, c_void_p]
-        objc.method_getImplementation.restype = c_void_p
-        objc.method_getImplementation.argtypes = [c_void_p]
-
-        view = c_void_p(int(window.winId()))
-        ns_view_cls = objc.objc_getClass(b"NSView")
-        ns_window_cls = objc.objc_getClass(b"NSWindow")
-
-        sel_window = objc.sel_registerName(b"window")
-        imp_window = objc.method_getImplementation(objc.class_getInstanceMethod(ns_view_cls, sel_window))
-        get_window = ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p)(imp_window)
-        ns_window = get_window(view, sel_window)
-        if not ns_window:
-            logger.warning("Failed to obtain NSWindow via ctypes")
-            return False
-
-        sel_level = objc.sel_registerName(b"setLevel:")
-        imp_level = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_level))
-        set_level = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_long)(imp_level)
-        set_level(ns_window, sel_level, 3)
-
-        sel_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
-        imp_hides = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_hides))
-        set_hides = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_bool)(imp_hides)
-        set_hides(ns_window, sel_hides, False)
-
-        sel_behavior = objc.sel_registerName(b"setCollectionBehavior:")
-        imp_behavior = objc.method_getImplementation(objc.class_getInstanceMethod(ns_window_cls, sel_behavior))
-        set_behavior = ctypes.CFUNCTYPE(None, c_void_p, c_void_p, c_ulong)(imp_behavior)
-        set_behavior(ns_window, sel_behavior, 1 | 256 | 1024)
-
-        logger.debug("macOS topmost and multi-space behavior enforced via IMP (safe path)")
-        return True
-    except Exception as exc:
-        logger.warning("macOS topmost ctypes failed: %s", exc)
-        return False
-
-
-def _suppress_dwm_rounding(window: QWidget) -> bool:
-    """Disable Windows 11 DWM automatic corner rounding for this window."""
-    import ctypes
-
-    _DWMWA_WINDOW_CORNER_PREFERENCE = 33
-    _DWMWCP_DONOTROUND = 1
-
-    try:
-        hwnd = ctypes.c_void_p(int(window.winId()))
-        preference = ctypes.c_int(_DWMWCP_DONOTROUND)
-        result = ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
-            hwnd,
-            _DWMWA_WINDOW_CORNER_PREFERENCE,
-            ctypes.byref(preference),
-            ctypes.sizeof(preference),
-        )
-        if result != 0:
-            logger.debug(
-                "DWM corner suppression returned HRESULT=0x%08X",
-                result & 0xFFFFFFFF,
+    if path.suffix.lower() in _IMAGE_EXTS:
+        # Image thumbnail (no background)
+        pix = QPixmap(str(path))
+        if not pix.isNull():
+            scaled = pix.scaled(
+                icon_size, icon_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
-            return False
-        logger.debug("DWM automatic corner rounding suppressed")
-        return True
-    except Exception as exc:
-        logger.warning("DwmSetWindowAttribute failed: %s", exc)
-        return False
+            px = x + (size - scaled.width()) / 2
+            py = y + (size - scaled.height()) / 2
+            painter.drawPixmap(int(px), int(py), scaled)
+            return
+
+    # Fallback or non-image: Blank-file.svg with extension badge
+    pix = QPixmap(icon_size, icon_size)
+    pix.fill(Qt.GlobalColor.transparent)
+    ip = QPainter(pix)
+    blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
+    ip.end()
+    painter.drawPixmap(int(x + margin), int(y + margin), pix)
+
+    ext = path.suffix[1:].upper() or "?"
+    f = QFont()
+    f.setPointSize(round(icon_size * 0.14 * font_scale))
+    painter.setFont(f)
+    painter.setPen(QColor(100, 110, 140))
+    text_rect = QRectF(
+        x + margin + 4,
+        y + margin + icon_size * 0.62,
+        icon_size - 8,
+        icon_size * 0.35,
+    )
+    painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, ext)
 
 
 class _ThumbnailWidget(QWidget):
     """Renders the actual image thumbnail or SVG placeholder."""
-
-    _IMAGE_EXTS = frozenset({
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
-        ".svg", ".ico", ".tiff", ".tif", ".avif",
-    })
 
     def __init__(self, path: Path, font_scale: float, blank_renderer: QSvgRenderer, card_size: int, parent=None):
         super().__init__(parent)
@@ -118,44 +84,10 @@ class _ThumbnailWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        size = self.width()
-        icon_size = int(size * 0.8)
-        margin = (size - icon_size) / 2
-
-        if self._path.suffix.lower() in self._IMAGE_EXTS:
-            # Image thumbnail (no background)
-            pix = QPixmap(str(self._path))
-            if not pix.isNull():
-                scaled = pix.scaled(
-                    icon_size, icon_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                px = (size - scaled.width()) / 2
-                py = (size - scaled.height()) / 2
-                painter.drawPixmap(int(px), int(py), scaled)
-        else:
-            # Blank-file.svg with extension badge
-            pix = QPixmap(icon_size, icon_size)
-            pix.fill(Qt.GlobalColor.transparent)
-            ip = QPainter(pix)
-            self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
-            ip.end()
-            painter.drawPixmap(int(margin), int(margin), pix)
-
-            ext = self._path.suffix[1:].upper() or "?"
-            f = QFont()
-            f.setPointSize(round(icon_size * 0.14))
-            painter.setFont(f)
-            painter.setPen(QColor(100, 110, 140))
-            text_rect = QRectF(
-                margin + 4,
-                margin + icon_size * 0.62,
-                icon_size - 8,
-                icon_size * 0.35,
-            )
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, ext)
+        _draw_file_thumbnail(
+            painter, self._path, 0, 0, self.width(),
+            self._font_scale, self._blank_renderer
+        )
 
 
 class _FileGridItem(QWidget):
@@ -191,7 +123,7 @@ class _FileGridItem(QWidget):
         layout.addWidget(self.label)
 
 
-class _FileGridWindow(QWidget):
+class _FileGridWindow(QWidget, PlatformCompatMixin):
     """An expanded floating window displaying files in a responsive grid."""
 
     def __init__(self, files: list[Path], font_scale: float, blank_renderer: QSvgRenderer, card_size: int, radius: int, parent=None):
@@ -256,12 +188,7 @@ class _FileGridWindow(QWidget):
     def showEvent(self, event) -> None:
         """Re-apply platform-specific window hacks after the native window is created."""
         super().showEvent(event)
-        if IS_MACOS and not getattr(self, "_macos_level_set", False):
-            if _enforce_macos_topmost(self):
-                self._macos_level_set = True
-        elif IS_WINDOWS and not getattr(self, "_dwm_rounding_suppressed", False):
-            if _suppress_dwm_rounding(self):
-                self._dwm_rounding_suppressed = True
+        self.apply_platform_hacks()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -281,16 +208,11 @@ class _FileGridWindow(QWidget):
 
 
 class _FileStackWidget(QWidget):
-    """Draws files as stacked cards — blank placeholders for older files,
-    real thumbnail for the most recent file."""
+    """Draws files as stacked cards — using uniform thumbnail logic."""
 
     _MAX_BLANK = 4
     _STACK_OFFSET_X = 10
     _STACK_OFFSET_Y = 6
-    _IMAGE_EXTS = frozenset({
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
-        ".svg", ".ico", ".tiff", ".tif", ".avif",
-    })  # fmt: skip
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -309,10 +231,6 @@ class _FileStackWidget(QWidget):
     def set_font_scale(self, scale: float) -> None:
         self._font_scale = scale
 
-    # ------------------------------------------------------------------
-    # Paint
-    # ------------------------------------------------------------------
-
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -324,7 +242,6 @@ class _FileStackWidget(QWidget):
         w, h = self.width(), self.height()
         window_size = int(config_manager.get("window_size"))
         card_size = min(window_size * 0.5, 160)
-        radius = max(9, card_size * 0.1)
 
         blanks = self._files[:-1]
         blank_count = min(len(blanks), self._MAX_BLANK)
@@ -334,15 +251,15 @@ class _FileStackWidget(QWidget):
         rx = cx - card_size / 2 + max(blank_count - 1, 0) * self._STACK_OFFSET_X / 2
         ry = cy - card_size / 2 + max(blank_count - 1, 0) * self._STACK_OFFSET_Y / 2
 
-        # Draw blank cards from deepest to nearest
+        # Draw underlying cards from deepest to nearest
         for i in range(blank_count):
             depth = blank_count - i
             bx = rx - depth * self._STACK_OFFSET_X
             by = ry - depth * self._STACK_OFFSET_Y
-            self._draw_blank(painter, bx, by, card_size, radius, blanks[blank_start + i])
+            _draw_file_thumbnail(painter, blanks[blank_start + i], bx, by, card_size, self._font_scale, self._blank_renderer)
 
         # Draw latest file card on top
-        self._draw_file_card(painter, rx, ry, card_size, radius, self._files[-1])
+        _draw_file_thumbnail(painter, self._files[-1], rx, ry, card_size, self._font_scale, self._blank_renderer)
 
     def _draw_empty(self, painter: QPainter) -> None:
         if not self._empty_text:
@@ -353,57 +270,90 @@ class _FileStackWidget(QWidget):
         painter.setFont(f)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._empty_text)
 
-    def _draw_blank(self, painter: QPainter, x: float, y: float, size: float, radius: float, path: Path) -> None:
-        icon_size = int(size * 0.8)
-        pix = QPixmap(icon_size, icon_size)
-        pix.fill(Qt.GlobalColor.transparent)
-        ip = QPainter(pix)
-        self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
-        ip.end()
-        px = x + (size - icon_size) / 2
-        py = y + (size - icon_size) / 2
-        painter.drawPixmap(int(px), int(py), pix)
 
-    def _draw_file_card(self, painter: QPainter, x: float, y: float, size: float, radius: float, path: Path) -> None:
-        icon_size = int(size * 0.8)
-        margin = (size - icon_size) / 2
+class _TopMenu(QMenu, PlatformCompatMixin):
+    """QMenu subclass that enforces macOS topmost behavior."""
 
-        if path.suffix.lower() in self._IMAGE_EXTS:
-            # Image thumbnail (no background)
-            pix = QPixmap(str(path))
-            if not pix.isNull():
-                scaled = pix.scaled(
-                    icon_size, icon_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                px = x + (size - scaled.width()) / 2
-                py = y + (size - scaled.height()) / 2
-                painter.drawPixmap(int(px), int(py), scaled)
-        else:
-            # Blank-file.svg with extension badge at bottom-right
-            pix = QPixmap(icon_size, icon_size)
-            pix.fill(Qt.GlobalColor.transparent)
-            ip = QPainter(pix)
-            self._blank_renderer.render(ip, QRectF(0, 0, icon_size, icon_size))
-            ip.end()
-            painter.drawPixmap(int(x + margin), int(y + margin), pix)
-
-            ext = path.suffix[1:].upper() or "?"
-            f = QFont()
-            f.setPointSize(round(icon_size * 0.14))
-            painter.setFont(f)
-            painter.setPen(QColor(100, 110, 140))
-            text_rect = QRectF(
-                x + margin + 4,
-                y + margin + icon_size * 0.62,
-                icon_size - 8,
-                icon_size * 0.35,
-            )
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, ext)
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.apply_platform_hacks()
 
 
-class CourierBasketWindow(QWidget):
+class _PillButton(QAbstractButton):
+    """Pill-shaped button with text on the left and a circular icon on the right."""
+
+    _CIRCLE_DIAM = 20
+    _RIGHT_MARGIN = 8
+    _TEXT_LEFT = 16
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hovered = False
+        self.setFixedHeight(30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        pal = theme_manager._palette
+
+        # Pill background + border
+        bg = pal.pill_btn_hover_bg if self._hovered else pal.pill_btn_bg
+        painter.setPen(QPen(QColor(*pal.pill_btn_border), 1))
+        painter.setBrush(QColor(*bg))
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.drawRoundedRect(rect, 15, 15)
+
+        # Text (left-aligned, vertically centered)
+        text_color = pal.pill_btn_hover_color if self._hovered else pal.pill_btn_color
+        painter.setFont(self.font())
+        painter.setPen(QColor(*text_color))
+        text_r = QRectF(
+            self._TEXT_LEFT, 0,
+            w - self._TEXT_LEFT - self._RIGHT_MARGIN - self._CIRCLE_DIAM - 4,
+            h,
+        )
+        painter.drawText(text_r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+
+        # Circle background on the right
+        cx = w - self._RIGHT_MARGIN - self._CIRCLE_DIAM
+        cy = (h - self._CIRCLE_DIAM) / 2
+        circle_bg = pal.overlay_btn_hover_bg if self._hovered else pal.overlay_btn_bg
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(*circle_bg))
+        painter.drawEllipse(int(cx), int(cy), self._CIRCLE_DIAM, self._CIRCLE_DIAM)
+
+        # Chevron icon centered in the circle
+        icon = self.icon()
+        if not icon.isNull():
+            icon_size = 12
+            pix = icon.pixmap(icon_size, icon_size)
+            ix = cx + (self._CIRCLE_DIAM - icon_size) / 2
+            iy = (h - icon_size) / 2
+            painter.drawPixmap(int(ix), int(iy), pix)
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def sizeHint(self) -> QSize:
+        metrics = self.fontMetrics()
+        text_w = metrics.horizontalAdvance(self.text())
+        total = text_w + self._TEXT_LEFT + self._CIRCLE_DIAM + self._RIGHT_MARGIN + 12
+        return QSize(total, 30)
+
+
+class CourierBasketWindow(QWidget, PlatformCompatMixin):
     """A square, always-on-top, frameless window for staging file transfers."""
 
     _HEADER_RATIO = 0.15
@@ -419,7 +369,7 @@ class CourierBasketWindow(QWidget):
         self._temp_zip: Path | None = None
         self._expanded = False
         self._grid_window: _FileGridWindow | None = None
-        self._pill_btn: QPushButton
+        self._pill_btn: _PillButton
 
         self._setup_window()
         self._create_ui()
@@ -461,6 +411,7 @@ class CourierBasketWindow(QWidget):
             self._grid_window._radius = self._radius
             self._grid_window.setStyleSheet(theme_manager.window_stylesheet())
             self._grid_window.update()
+        self._pill_btn.update()
         self.update()
         logger.debug("Theme stylesheet applied | radius=%d", self._radius)
 
@@ -478,18 +429,6 @@ class CourierBasketWindow(QWidget):
         self._chevron_down = theme_manager.chevron_down_icon
         self._chevron_up = theme_manager.chevron_up_icon
         self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
-
-    @property
-    def _font_scale(self) -> float:
-        """DPI-aware font scale factor, platform-adjusted."""
-        screen = QApplication.primaryScreen()
-        if screen is None:
-            return 1.0
-
-        dpi = screen.logicalDotsPerInch()
-        if IS_MACOS:  # MacOS: baseline 72 DPI
-            return max(1.0, min(3.0, (dpi / 72.0) * 1.2))
-        return max(0.8, min(3.0, dpi / 96.0))  # Windows / Linux: baseline 96 DPI
 
     def _create_ui(self) -> None:
         base_size = self.height()
@@ -518,7 +457,7 @@ class CourierBasketWindow(QWidget):
         self._title_label = QLabel(tr("app.name"))
         self._title_label.setObjectName("courier-title")
         tf = QFont()
-        tf.setPointSize(round(11 * self._font_scale))
+        tf.setPointSize(round(11 * self.font_scale))
         tf.setBold(True)
         self._title_label.setFont(tf)
 
@@ -563,7 +502,7 @@ class CourierBasketWindow(QWidget):
         self._file_stack.setObjectName("courier-file-list")
         self._file_stack.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._file_stack.set_empty_text(tr("basket.empty_hint"))
-        self._file_stack.set_font_scale(self._font_scale)
+        self._file_stack.set_font_scale(self.font_scale)
 
         # -- Footer with pill button --
         self._footer = QWidget()
@@ -573,15 +512,10 @@ class CourierBasketWindow(QWidget):
         self._chevron_down = theme_manager.chevron_down_icon
         self._chevron_up = theme_manager.chevron_up_icon
 
-        self._pill_btn = QPushButton(self._footer)
-        self._pill_btn.setObjectName("courier-pill-btn")
+        self._pill_btn = _PillButton(self._footer)
         self._pill_btn.setIcon(self._chevron_down)
-        self._pill_btn.setIconSize(QSize(14, 14))
-        self._pill_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self._pill_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pill_btn.setFixedHeight(30)
         pf = QFont()
-        pf.setPointSize(round(10 * self._font_scale))
+        pf.setPointSize(round(10 * self.font_scale))
         self._pill_btn.setFont(pf)
         self._pill_btn.hide()
         self._pill_btn.clicked.connect(self._toggle_expand)
@@ -625,12 +559,7 @@ class CourierBasketWindow(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if IS_MACOS and not getattr(self, "_macos_level_set", False):
-            if _enforce_macos_topmost(self):
-                self._macos_level_set = True
-        elif IS_WINDOWS and not getattr(self, "_dwm_rounding_suppressed", False):
-            if _suppress_dwm_rounding(self):
-                self._dwm_rounding_suppressed = True
+        self.apply_platform_hacks()
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -798,8 +727,8 @@ class CourierBasketWindow(QWidget):
         return f"{n / (1024**idx):.1f} {units[idx]}"
 
     def _show_menu(self) -> None:
-        menu = QMenu(self)
-        mfs = round(9 * self._font_scale)
+        menu = _TopMenu(self)
+        mfs = round(9 * self.font_scale)
         menu.setStyleSheet(theme_manager.menu_stylesheet(mfs))
 
         clear_act = QAction(tr("basket.clear"), self)
@@ -852,7 +781,7 @@ class CourierBasketWindow(QWidget):
 
             self._grid_window = _FileGridWindow(
                 files=self._basket.files,
-                font_scale=self._font_scale,
+                font_scale=self.font_scale,
                 blank_renderer=self._file_stack._blank_renderer,
                 card_size=card_size,
                 radius=self._radius,
