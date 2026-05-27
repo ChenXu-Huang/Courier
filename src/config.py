@@ -20,6 +20,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "global_hotkey": "shift+enter" if IS_MACOS else "shift+caps lock",
     "show_on_startup": True,
     "compress_on_drag": False,
+    "ffmpeg_path": "ffmpeg",
 }
 
 
