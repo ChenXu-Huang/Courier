@@ -2,8 +2,9 @@
 
 import ctypes
 from ctypes import c_bool, c_char_p, c_int, c_long, c_void_p, c_ulong
-
 from PySide6.QtWidgets import QApplication
+
+from typing import TYPE_CHECKING
 
 from .._meta import IS_MACOS, IS_WINDOWS
 from ..logger import get_logger
@@ -13,6 +14,10 @@ logger = get_logger(__name__)
 
 class PlatformCompatMixin:
     """Mixin providing platform-specific window enhancements and DPI utilities."""
+
+    if TYPE_CHECKING:
+        # Stub for mypy — at runtime winId() is inherited from QWidget
+        def winId(self) -> int: ...
 
     def apply_platform_hacks(self) -> None:
         """Apply macOS topmost and Windows 11 DWM hacks. Call inside showEvent()."""
