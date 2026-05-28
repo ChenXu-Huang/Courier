@@ -3,7 +3,6 @@
 
   "basket.empty_hint": "Drop files here",
   "basket.clear": "Clear",
-  "basket.more": "+{count} more...",
   "basket.files_missing": "Skipped missing files:\n{names}",
   "basket.compress": "Compress on drag",
   "basket.file_count": "{count} files",
@@ -33,10 +32,9 @@
   "settings.theme_mode.light": "Light",
   "settings.invalid_title": "Invalid Settings",
   "settings.validate_hotkey_empty": "The hotkey cannot be empty",
+  "settings.validate_hotkey_invalid": "Invalid hotkey format",
 
   "lang.auto": "Auto",
   "lang.zh_CN": "Chinese",
-  "lang.en_US": "English",
-
-  "info.items": "{count} items · {size}"
+  "lang.en_US": "English"
 }

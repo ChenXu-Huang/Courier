@@ -3,7 +3,6 @@
 
   "basket.empty_hint": "拖拽文件到此",
   "basket.clear": "清空",
-  "basket.more": "还有 {count} 个...",
   "basket.files_missing": "已跳过不存在的文件：\n{names}",
   "basket.compress": "压缩拖出",
   "basket.file_count": "{count} 个文件",
@@ -33,10 +32,9 @@
   "settings.theme_mode.light": "浅色",
   "settings.invalid_title": "无效设置",
   "settings.validate_hotkey_empty": "快捷键不能为空",
+  "settings.validate_hotkey_invalid": "快捷键格式无效",
 
   "lang.auto": "自动",
   "lang.zh_CN": "中文",
-  "lang.en_US": "英文",
-
-  "info.items": "{count} 项 · {size}"
+  "lang.en_US": "英文"
 }
