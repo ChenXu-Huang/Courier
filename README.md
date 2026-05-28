@@ -52,7 +52,7 @@ uv sync --group dev
 Run the program:
 
 ```bash
-uv run python main.py
+uv run main.py
 ```
 
 A square floating window appears on your screen. Drag any files or folders into it, go to your target location, and drag them out.
@@ -70,8 +70,8 @@ Settings are available through the tray menu → **Settings**, or directly in `c
 | Key | Default | Description |
 |-----|---------|-------------|
 | `language` | `"auto"` | Interface language: `"auto"`, `"zh_CN"`, `"en_US"` |
-| `window_size` | `320` | Window width/height in pixels |
-| `window_opacity` | `0.92` | Window opacity (0.1–1.0) |
+| `window_size` | `240` | Window width/height in pixels |
+| `window_opacity` | `0.90` | Window opacity (0.1–1.0) |
 | `window_radius` | `20` | Corner radius in pixels |
 | `after_drop_action` | `"close"` | Action after drag-out: `close`, `clear`, or `keep` |
 | `default_transfer_mode` | `"copy"` | Transfer mode: `copy` or `move` |
