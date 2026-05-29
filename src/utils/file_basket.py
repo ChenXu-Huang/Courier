@@ -1,3 +1,5 @@
+import math
+from collections import Counter
 from pathlib import Path
 
 from ..logger import get_logger
@@ -17,19 +19,26 @@ class FileBasket:
         added = 0
         for p in paths:
             resolved = p.resolve()
-            if resolved not in self._paths:
-                self._files.append(resolved)
-                self._paths.add(resolved)
-                added += 1
-        if added != len(paths):
-            logger.debug("Basket add | requested=%d added=%d duplicates=%d", len(paths), added, len(paths) - added)
+            if resolved in self._paths:
+                continue
+            self._files.append(resolved)
+            self._paths.add(resolved)
+            added += 1
+
+        if added < len(paths):
+            logger.debug(
+                "Basket add | requested=%d added=%d duplicates=%d",
+                len(paths),
+                added,
+                len(paths) - added,
+            )
         return added
 
     def remove(self, path: Path) -> bool:
         resolved = path.resolve()
         if resolved not in self._paths:
             return False
-        self._files = [p for p in self._files if p != resolved]
+        self._files.remove(resolved)
         self._paths.discard(resolved)
         logger.debug("Basket remove | path=%s", resolved)
         return True
@@ -45,26 +54,33 @@ class FileBasket:
 
     @property
     def count(self) -> int:
-        return len(self._files)
+        return len(self)
 
     @property
     def is_empty(self) -> bool:
-        return len(self._files) == 0
+        return not self
 
     @property
     def total_size(self) -> int:
-        total = 0
-        for p in self._files:
+        def _size(p: Path) -> int:
             try:
                 if p.is_file():
-                    total += p.stat().st_size
-                elif p.is_dir():
-                    for f in p.rglob("*"):
-                        if f.is_file():
-                            total += f.stat().st_size
+                    return p.stat().st_size
+                if p.is_dir():
+                    return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
             except OSError:
                 pass
-        return total
+            return 0
+
+        return sum(_size(p) for p in self._files)
+
+    @staticmethod
+    def _format_size(n: int) -> str:
+        if n <= 0:
+            return "0 B"
+        units = ["B", "KB", "MB", "GB"]
+        idx = min(int(math.log(n, 1024)), len(units) - 1)
+        return f"{n / (1024**idx):.2f} {units[idx]}"
 
     def validate(self) -> list[Path]:
         """Return paths that no longer exist on disk."""
@@ -76,10 +92,8 @@ class FileBasket:
     @property
     def duplicate_names(self) -> set[str]:
         """Return set of filenames that appear more than once."""
-        names: dict[str, int] = {}
-        for p in self._files:
-            names[p.name] = names.get(p.name, 0) + 1
-        return {n for n, c in names.items() if c > 1}
+        counts = Counter(p.name for p in self._files)
+        return {name for name, c in counts.items() if c > 1}
 
     def display_labels(self, max_count: int = 0) -> list[tuple[Path, str]]:
         """Return ``(path, label)`` pairs.
@@ -88,24 +102,19 @@ class FileBasket:
         collides with another staged file.
         """
         dups = self.duplicate_names
-        pairs: list[tuple[Path, str]] = []
-        for p in self._files:
-            if p.name in dups:
-                label = f"{p.parent.name}/{p.name}"
-            else:
-                label = p.name
-            if len(label) > 44:
-                label = label[:41] + "..."
-            pairs.append((p, label))
-        if max_count > 0:
-            pairs = pairs[:max_count]
-        return pairs
+
+        def _label(p: Path) -> str:
+            label = f"{p.parent.name}/{p.name}" if p.name in dups else p.name
+            return label if len(label) <= 44 else label[:41] + "..."
+
+        pairs = [(p, _label(p)) for p in self._files]
+        return pairs[:max_count] if max_count > 0 else pairs
 
     def __len__(self) -> int:
         return len(self._files)
 
     def __bool__(self) -> bool:
-        return not self.is_empty
+        return bool(self._files)
 
     def __iter__(self):
         return iter(self._files)

@@ -1,6 +1,5 @@
 """Square floating window — drag-drop file staging surface."""
 
-import math
 import random
 import uuid
 from pathlib import Path
@@ -567,11 +566,10 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
             added = self._basket.add(paths)
             paths_str = ", ".join(str(p) for p in paths)
             logger.info(
-                "Files dropped | added=%d paths=[%s] total=%d size=%s",
+                "Files dropped | added=%d paths=[%s] total=%d",
                 added,
                 paths_str,
                 self._basket.count,
-                self._format_size(self._basket.total_size),
             )
             self._update_display()
         else:
@@ -703,14 +701,6 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
             self._pill_btn.show()
 
         self.setStyleSheet(theme_manager.window_stylesheet())
-
-    @staticmethod
-    def _format_size(n: int) -> str:
-        if n <= 0:
-            return "0 B"
-        units = ["B", "KB", "MB", "GB"]
-        idx = min(int(math.log(n, 1024)), len(units) - 1)
-        return f"{n / (1024**idx):.1f} {units[idx]}"
 
     def _show_menu(self) -> None:
         menu = _TopMenu(self)
