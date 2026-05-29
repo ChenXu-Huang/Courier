@@ -76,8 +76,20 @@ class ThumbnailProvider:
             if pix is None or pix.isNull():
                 icon = self._icon_provider.icon(QFileInfo(str(path)))
                 pix = icon.pixmap(QSize(icon_size, icon_size))
+                if not pix.isNull():
+                    pix.setDevicePixelRatio(dpr)
 
             if pix is not None and not pix.isNull():
+                # Ensure pixmap fits within icon_size at the correct DPR
+                physical_target = int(icon_size * dpr)
+                if pix.size() != QSize(physical_target, physical_target) or pix.devicePixelRatio() != dpr:
+                    pix = pix.scaled(
+                        physical_target, physical_target,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    pix.setDevicePixelRatio(dpr)
+
                 pix_dpr = pix.devicePixelRatio()
                 logical_w = pix.width() / pix_dpr
                 logical_h = pix.height() / pix_dpr

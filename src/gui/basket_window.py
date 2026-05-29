@@ -216,7 +216,7 @@ class _FileStackWidget(QWidget):
 
             w, h = self.width(), self.height()
             window_size = int(config_manager.get("window_size"))
-            card_size = min(window_size * 0.5, 160)
+            card_size = min(window_size * 0.55, 160)
 
             blanks = self._files[:-1]
             blank_count = min(len(blanks), self._STACK_DEPTH)
@@ -763,7 +763,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
 
         if self._expanded:
             window_size = int(config_manager.get("window_size"))
-            card_size = int(min(window_size * 0.5, 160))
+            card_size = int(min(window_size * 0.55, 160))
 
             self._grid_window = _FileGridWindow(
                 files=self._basket.files,
