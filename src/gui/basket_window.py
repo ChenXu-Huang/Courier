@@ -2,13 +2,13 @@
 
 import math
 import random
-import subprocess
 import uuid
 from pathlib import Path
-from PySide6.QtCore import QFileInfo, QSize, Qt, QMimeData, QRectF, QUrl, QPoint, QPointF
-from PySide6.QtGui import QAction, QColor, QDrag, QFont, QImageReader, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
+
+from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
+from PySide6.QtGui import QAction, QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QFileIconProvider, QHBoxLayout, QLabel,
+    QAbstractButton, QApplication, QHBoxLayout, QLabel,
     QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget,
     QGridLayout, QScrollArea,
 )  # fmt: skip
@@ -17,165 +17,16 @@ from ..config import config_manager
 from ..logger import get_logger, set_trace_id
 from ..utils import FileBasket, cleanup_temp_zip, create_temp_zip, tr, language_changed
 from .platform import PlatformCompatMixin
+from .thumbnail import ThumbnailProvider
 from .theme import theme_manager
 
 logger = get_logger(__name__)
 
 
-class _ThumbnailProvider:
-    """Encapsulates thumbnail loading, caching, and on-painter drawing (High-DPI Aware)."""
-
-    _IMAGE_EXTS = frozenset({
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
-        ".svg", ".ico", ".tiff", ".tif", ".avif",
-    })  # fmt: skip
-    _VIDEO_EXTS = frozenset({
-        ".mp4", ".mkv", ".webm", ".avi", ".mov",
-        ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-    })  # fmt: skip
-
-    def __init__(self, cache_max: int = 256, ffmpeg_path: str = "ffmpeg") -> None:
-        self._cache: dict[tuple[str, int, int, float], QPixmap] = {}
-        self._cache_max = cache_max
-        self._ffmpeg_path = ffmpeg_path
-        self._icon_provider = QFileIconProvider()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def draw(self, painter: QPainter, path: Path, x: float, y: float, size: float) -> None:
-        """Draw file thumbnail: image content, video frame, or system icon fallback."""
-        try:
-            dpr = painter.device().devicePixelRatioF()
-            icon_size = int(size * 0.8)
-            suffix = path.suffix.lower()
-
-            if suffix in self._IMAGE_EXTS:
-                pix = self._load_image(path, icon_size, dpr)
-            elif suffix in self._VIDEO_EXTS:
-                pix = self._load_video(path, icon_size, dpr)
-            else:
-                pix = None
-
-            if pix is None:
-                icon = self._icon_provider.icon(QFileInfo(str(path)))
-                pix = icon.pixmap(QSize(icon_size, icon_size))
-
-            if pix is not None and not pix.isNull():
-                pix_dpr = pix.devicePixelRatio()
-                logical_w = pix.width() / pix_dpr
-                logical_h = pix.height() / pix_dpr
-                dx = int(x + (size - logical_w) / 2)
-                dy = int(y + (size - logical_h) / 2)
-                painter.drawPixmap(dx, dy, pix)
-                if suffix in self._VIDEO_EXTS:
-                    self._draw_play_overlay(painter, x, y, size)
-        except Exception as e:
-            logger.error("Error drawing thumbnail for %s: %s", path, e)
-
-    def clear_cache(self) -> None:
-        self._cache.clear()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _cache_key(self, path: Path, size: int, dpr: float) -> tuple[str, int, int, float]:
-        return (str(path), path.stat().st_mtime_ns, size, dpr)
-
-    def _cache_get(self, path: Path, size: int, dpr: float) -> QPixmap | None:
-        return self._cache.get(self._cache_key(path, size, dpr))
-
-    def _cache_put(self, path: Path, size: int, pix: QPixmap, dpr: float) -> None:
-        if len(self._cache) >= self._cache_max:
-            self._cache.pop(next(iter(self._cache)))
-        self._cache[self._cache_key(path, size, dpr)] = pix
-
-    def _load_image(self, path: Path, size: int, dpr: float) -> QPixmap | None:
-        """Load actual image content scaled to fit *size*, with EXIF orientation."""
-        cached = self._cache_get(path, size, dpr)
-        if cached is not None:
-            return cached
-
-        try:
-            physical_size = int(size * dpr)
-            reader = QImageReader(str(path))
-            reader.setAutoTransform(True)
-
-            orig_size = reader.size()
-            reader.setScaledSize(
-                orig_size.scaled(physical_size, physical_size, Qt.AspectRatioMode.KeepAspectRatio)
-                if orig_size.isValid()
-                else QSize(physical_size, physical_size)
-            )
-
-            img = reader.read()
-            if img.isNull():
-                return None
-
-            pix = QPixmap.fromImage(img)
-            pix.setDevicePixelRatio(dpr)
-            self._cache_put(path, size, pix, dpr)
-            return pix
-        except Exception as e:
-            logger.error("Failed to load image %s: %s", path, e)
-            return None
-
-    def _load_video(self, path: Path, size: int, dpr: float) -> QPixmap | None:
-        """Extract a video frame via ffmpeg and return a scaled pixmap."""
-        cached = self._cache_get(path, size, dpr)
-        if cached is not None:
-            return cached
-
-        try:
-            proc = subprocess.run(
-                [self._ffmpeg_path, "-ss", "1", "-i", str(path), "-vframes", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
-                capture_output=True,
-                timeout=15,
-            )
-            if proc.returncode != 0 or not proc.stdout:
-                return None
-
-            pix = QPixmap()
-            if not pix.loadFromData(proc.stdout):
-                return None
-
-            physical_size = int(size * dpr)
-            scaled = pix.scaled(physical_size, physical_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            scaled.setDevicePixelRatio(dpr)
-            self._cache_put(path, size, scaled, dpr)
-            return scaled
-        except Exception as e:
-            logger.error("Failed to extract video frame for %s: %s", path, e)
-            return None
-
-    @staticmethod
-    def _draw_play_overlay(painter: QPainter, x: float, y: float, size: float) -> None:
-        """Small semi-transparent play triangle for video thumbnails."""
-        cx = x + size / 2
-        cy = y + size / 2
-        r = size * 0.1
-
-        painter.save()
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 140))
-        painter.drawEllipse(QPointF(cx, cy), r, r)
-        painter.setBrush(QColor(255, 255, 255, 220))
-        path = QPainterPath()
-        s = r * 0.55
-        path.moveTo(cx - s * 0.6, cy - s)
-        path.lineTo(cx + s, cy)
-        path.lineTo(cx - s * 0.6, cy + s)
-        path.closeSubpath()
-        painter.drawPath(path)
-        painter.restore()
-
-
 class _ThumbnailWidget(QWidget):
     """Renders the system file icon as thumbnail."""
 
-    def __init__(self, path: Path, card_size: int, provider: _ThumbnailProvider, parent=None):
+    def __init__(self, path: Path, card_size: int, provider: ThumbnailProvider, parent=None):
         super().__init__(parent)
         self._path = path
         self._provider = provider
@@ -193,7 +44,7 @@ class _ThumbnailWidget(QWidget):
 class _FileGridItem(QWidget):
     """A single file thumbnail card with its filename below."""
 
-    def __init__(self, path: Path, font_scale: float, card_size: int, provider: _ThumbnailProvider, parent=None):
+    def __init__(self, path: Path, font_scale: float, card_size: int, provider: ThumbnailProvider, parent=None):
         super().__init__(parent)
         self.setFixedWidth(card_size)
 
@@ -232,7 +83,7 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
         font_scale: float,
         card_size: int,
         radius: int,
-        provider: _ThumbnailProvider,
+        provider: ThumbnailProvider,
         parent=None,
     ):
         super().__init__(parent)
@@ -322,10 +173,10 @@ class _FileStackWidget(QWidget):
     """Draws files as stacked cards with alternating random rotations."""
 
     _STACK_DEPTH = 4
-    _ROTATION_MIN_DEG = 3
-    _ROTATION_MAX_DEG = 6
+    _ROTATION_MIN_DEG = 5
+    _ROTATION_MAX_DEG = 10
 
-    def __init__(self, provider: _ThumbnailProvider, parent: QWidget | None = None) -> None:
+    def __init__(self, provider: ThumbnailProvider, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._provider = provider
         self._files: list[Path] = []
@@ -501,7 +352,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         self._expanded = False
         self._grid_window: _FileGridWindow | None = None
         self._pill_btn: _PillButton
-        self._thumb_provider = _ThumbnailProvider(ffmpeg_path=config_manager.get("ffmpeg_path"))
+        self._thumb_provider = ThumbnailProvider(ffmpeg_path=config_manager.get("ffmpeg_path"))
 
         self._setup_window()
         self._create_ui()
@@ -912,7 +763,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
 
         if self._expanded:
             window_size = int(config_manager.get("window_size"))
-            card_size = int(min(window_size * 0.6, 160))
+            card_size = int(min(window_size * 0.5, 160))
 
             self._grid_window = _FileGridWindow(
                 files=self._basket.files,
