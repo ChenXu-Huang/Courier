@@ -40,6 +40,15 @@ def _resolve_root() -> Path:
 ROOT_DIR = _resolve_root()
 
 
+def _is_portable() -> bool:
+    """True when a ``.portable`` file exists next to the bundled executable.
+
+    In portable mode all runtime data (config, logs) is stored directly
+    under ``ROOT_DIR`` instead of OS-specific standard locations.
+    """
+    return _is_bundled() and (ROOT_DIR / ".portable").is_file()
+
+
 def _get_resources_dir() -> Path:
     if IS_MACOS and _is_bundled():
         return ROOT_DIR / "Resources"
@@ -47,7 +56,7 @@ def _get_resources_dir() -> Path:
 
 
 def _get_config_dir() -> Path:
-    if not _is_bundled():
+    if not _is_bundled() or _is_portable():
         return ROOT_DIR / "config"
     if IS_MACOS:
         return Path.home() / "Library" / "Application Support" / APP_NAME
@@ -58,7 +67,7 @@ def _get_config_dir() -> Path:
 
 
 def _get_log_dir() -> Path:
-    if not _is_bundled():
+    if not _is_bundled() or _is_portable():
         return ROOT_DIR / "logs"
     if IS_MACOS:
         return Path.home() / "Library" / "Logs" / APP_NAME
