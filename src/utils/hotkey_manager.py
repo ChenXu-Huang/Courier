@@ -56,6 +56,11 @@ class Hotkey:
     def __str__(self) -> str:
         return self._str
 
+    @property
+    def has_caps_lock(self) -> bool:
+        """Return whether Caps Lock is part of this hotkey."""
+        return Key.caps_lock in self._keys
+
     @classmethod
     def validate(cls, hotkey_str: str) -> bool:
         """Return whether *hotkey_str* is fully recognised."""
@@ -117,6 +122,7 @@ class CourierHotkeyManager(QObject):
         self._controller = Controller()
         self._caps_lock_lock = threading.Lock()
         self._caps_lock_was_pressed = False
+        self._should_restore_caps = False
         self._suppress_caps = 0
         self._last_synthetic_time = 0.0
         self._paused = False
@@ -154,6 +160,7 @@ class CourierHotkeyManager(QObject):
         self._pressed.clear()
         with self._caps_lock_lock:
             self._caps_lock_was_pressed = False
+            self._should_restore_caps = False
             self._suppress_caps = 0
 
     def pause(self) -> None:
@@ -161,6 +168,7 @@ class CourierHotkeyManager(QObject):
         self._pressed.clear()
         with self._caps_lock_lock:
             self._caps_lock_was_pressed = False
+            self._should_restore_caps = False
             self._suppress_caps = 0
 
     def resume(self) -> None:
@@ -214,6 +222,8 @@ class CourierHotkeyManager(QObject):
         self._pressed.add(key)
         if not self._fired and self._hotkey.is_active(self._pressed):
             self._fired = True
+            if self._caps_lock_was_pressed and self._hotkey.has_caps_lock:
+                self._should_restore_caps = True
             self.hotkey_triggered.emit()
 
     def _on_release(self, key: Key | KeyCode | None) -> None:
@@ -232,7 +242,9 @@ class CourierHotkeyManager(QObject):
 
             if self._caps_lock_was_pressed:
                 self._caps_lock_was_pressed = False
-                self._restore_caps_lock()
+                if self._should_restore_caps:
+                    self._should_restore_caps = False
+                    self._restore_caps_lock()
 
         if self._fired and not self._hotkey.is_active(self._pressed):
             self._fired = False
