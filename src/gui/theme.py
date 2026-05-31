@@ -97,6 +97,12 @@ class ThemePalette:
                 border-radius: 14px;
                 color: {self._rgba(self.overlay_btn_color)};
             }}
+            #courier-close-btn-small {{
+                background: {self._rgba(self.overlay_btn_bg)};
+                border: none;
+                border-radius: 10px;
+                color: {self._rgba(self.overlay_btn_color)};
+            }}
             #courier-close-btn:hover, #courier-menu-btn:hover {{
                 background: {self._rgba(self.overlay_btn_hover_bg)};
                 color: {self._rgba(self.overlay_btn_hover_color)};

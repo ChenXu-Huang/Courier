@@ -43,19 +43,47 @@ class _ThumbnailWidget(QWidget):
 class _FileGridItem(QWidget):
     """A single file thumbnail card with its filename below."""
 
-    def __init__(self, path: Path, font_scale: float, card_size: int, provider: ThumbnailProvider, parent=None):
+    def __init__(
+        self,
+        path: Path,
+        font_scale: float,
+        card_size: int,
+        provider: ThumbnailProvider,
+        on_close=None,
+        parent=None
+    ):
         super().__init__(parent)
+        self._path = path
         self.setFixedWidth(card_size)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)  # gap between thumbnail and label
 
-        # 1. Thumbnail
-        self.thumb = _ThumbnailWidget(path, card_size, provider)
-        layout.addWidget(self.thumb, 0, Qt.AlignmentFlag.AlignCenter)
+        # Thumbnail with close-button overlay
+        thumb_container = QWidget()
+        thumb_container.setFixedSize(card_size, card_size)
+        thumb_layout = QVBoxLayout(thumb_container)
+        thumb_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 2. Filename label
+        self.thumb = _ThumbnailWidget(path, card_size, provider)
+        thumb_layout.addWidget(self.thumb)
+
+        self._close_btn = QPushButton(thumb_container)
+        self._close_btn.setObjectName("courier-close-btn-small")
+        self._close_btn.setIconSize(QSize(10, 10))
+        self._close_btn.setIcon(theme_manager.close_icon)
+        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_margin = 3
+        self._close_btn.move(card_size - 20 - btn_margin, btn_margin)
+        self._close_btn.raise_()
+        if on_close:
+            self._close_btn.clicked.connect(lambda: on_close(self._path))
+
+        layout.addWidget(thumb_container, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # Filename label
         self.label = QLabel()
         self.label.setObjectName("courier-file-label")  # mount theme color from theme.py
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -83,6 +111,7 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
         card_size: int,
         radius: int,
         provider: ThumbnailProvider,
+        on_file_remove=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -106,7 +135,8 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         content = QWidget()
-        content.setStyleSheet("background: transparent;")
+        content.setObjectName("courier-grid-content")
+        content.setStyleSheet("#courier-grid-content { background: transparent; }")
         grid = QGridLayout(content)
         grid.setSpacing(10)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -122,7 +152,7 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
             cols, vis_rows = 3, 2
 
         for i, path in enumerate(files):
-            item = _FileGridItem(path, font_scale, card_size, provider)
+            item = _FileGridItem(path, font_scale, card_size, provider, on_close=on_file_remove)
             r, c = divmod(i, cols)
             grid.addWidget(item, r, c)
 
@@ -752,16 +782,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         self._pill_btn.setIcon(self._chevron_up if self._expanded else self._chevron_down)
 
         if self._expanded:
-            window_size = int(config_manager.get("window_size"))
-            card_size = int(min(window_size * 0.55, 160))
-
-            self._grid_window = _FileGridWindow(
-                files=self._basket.files,
-                font_scale=self.font_scale,
-                card_size=card_size,
-                radius=self._radius,
-                provider=self._thumb_provider,
-            )
+            self._grid_window = self._build_grid_window()
             self._grid_window.setWindowOpacity(self.windowOpacity())
 
             # Anchor below the main window
@@ -776,6 +797,49 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
             if self._grid_window:
                 self._grid_window.close()
                 self._grid_window = None
+
+    def _build_grid_window(self) -> _FileGridWindow:
+        """Create a new grid window for the current basket contents."""
+        window_size = int(config_manager.get("window_size"))
+        card_size = int(min(window_size * 0.55, 160))
+        return _FileGridWindow(
+            files=self._basket.files,
+            font_scale=self.font_scale,
+            card_size=card_size,
+            radius=self._radius,
+            provider=self._thumb_provider,
+            on_file_remove=self._on_grid_file_remove,
+        )
+
+    def _on_grid_file_remove(self, path: Path) -> None:
+        """Remove a file from the basket and refresh the grid view."""
+        self._basket.remove(path)
+        cnt = self._basket.count
+
+        self._file_stack.set_files(self._basket.files)
+
+        if cnt == 0:
+            self._expanded = False
+            self._pill_btn.setIcon(self._chevron_down)
+            self._pill_btn.hide()
+            if self._grid_window:
+                self._grid_window.close()
+                self._grid_window = None
+        else:
+            self._pill_btn.setText(tr("basket.file_count", count=cnt))
+            self._pill_btn.show()
+            if self._grid_window:
+                self._grid_window.close()
+            self._grid_window = self._build_grid_window()
+
+            geo = self.geometry()
+            gw_w = self._grid_window.width()
+            x = geo.center().x() - gw_w // 2
+            y = geo.bottom() + 10
+            self._grid_window.move(x, y)
+            self._grid_window.show()
+
+        self.setStyleSheet(theme_manager.window_stylesheet())
 
     def closeEvent(self, event) -> None:
         if self._grid_window:
