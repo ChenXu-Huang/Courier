@@ -3,7 +3,7 @@
 # nuitka-project-if: {OS} == "Darwin":
 #    nuitka-project: --mode=app
 #    nuitka-project: --macos-signed-app-name=com.chenxu-huang.courier
-#    nuitka-project: --macos-sign-identity=ad-hoc
+#    nuitka-project: --macos-sign-identity="ChenXu-Huang Local Signing"
 #    nuitka-project: --macos-app-mode=ui-element
 #    nuitka-project: --macos-app-name=Courier
 #    nuitka-project: --macos-app-icon=dist/icon/icon.icns

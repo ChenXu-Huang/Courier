@@ -66,7 +66,7 @@ jobs:
           name: build-icons
           path: dist/icon/
 
-      - name: Extract metadata
+      - name: Extract version
         run: |
           REF_NAME="${{ github.ref_name }}"
           if [[ "$REF_NAME" =~ ^v[0-9] ]]; then
@@ -74,6 +74,17 @@ jobs:
           else
             echo "CLEAN_VERSION=0.0.1" >> "$GITHUB_ENV"
           fi
+
+      - name: Import macOS Code Signing Certificate
+        if: matrix.os-short == 'macos'
+        run: |
+          echo "${{ secrets.MACOS_CERTIFICATE_BASE64 }}" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
 
       - name: Build with Nuitka
         run: uv run nuitka --file-version=${{ env.CLEAN_VERSION }} main.py
