@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QLineEdit, QMessageBox, QSpinBox,
-    QVBoxLayout, QWidget, QCheckBox, 
+    QVBoxLayout, QWidget, QCheckBox,
 )  # fmt: skip
 
 from ..config import config_manager
@@ -17,11 +17,10 @@ from ..logger import get_logger
 from ..utils import Hotkey, tr, available_languages, current_language, set_language
 
 logger = get_logger(__name__)
-W = TypeVar("W", bound=QWidget)
 
 
 @dataclass(frozen=True)
-class FieldSpec(Generic[W]):
+class FieldSpec[W: QWidget]:
     """Describes one settings field: label, widget factory, getter/setter,
     and optional validator, and (for combo fields) i18n keys for each item.
     """
@@ -71,7 +70,7 @@ class FieldSpec(Generic[W]):
         data_values = [(i18n_key, data) for i18n_key, data in items]
         def make() -> QComboBox:
             w = QComboBox()
-            for i18n_key, data in data_values:
+            for _, data in data_values:
                 w.addItem("", data)
             return w
         return FieldSpec(
@@ -144,7 +143,7 @@ _FIELDS: list[FieldSpec[Any]] = [
 class CourierSettingsDialog(QDialog):
     """Modal settings dialog."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("settings.title"))
         self.setMinimumWidth(360)
@@ -217,6 +216,6 @@ class CourierSettingsDialog(QDialog):
                 set_language(new_lang)
 
             self.accept()
-        except BaseException:
+        except Exception:
             logger.exception("Failed to save settings")
             QMessageBox.critical(self, "Error", "Failed to save settings")

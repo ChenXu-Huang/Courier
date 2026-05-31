@@ -28,9 +28,7 @@ class FileBasket:
         if added < len(paths):
             logger.debug(
                 "Basket add | requested=%d added=%d duplicates=%d",
-                len(paths),
-                added,
-                len(paths) - added,
+                len(paths), added, len(paths) - added,
             )
         return added
 
