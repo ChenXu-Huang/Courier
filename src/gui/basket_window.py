@@ -4,7 +4,7 @@ import random
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QMimeData, QRectF, QUrl, QPoint
+from PySide6.QtCore import QEasingCurve, QMimeData, QPoint, QRectF, QSize, Qt, QUrl, QVariantAnimation
 from PySide6.QtGui import QAction, QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QHBoxLayout, QLabel,
@@ -205,27 +205,101 @@ class _FileStackWidget(QWidget):
     _ROTATION_MIN_DEG = 5
     _ROTATION_MAX_DEG = 10
 
-    def __init__(self, provider: ThumbnailProvider, parent: QWidget | None = None) -> None:
+    def __init__(self, provider: ThumbnailProvider, seed: str | int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._provider = provider
+        self._seed = seed
         self._files: list[Path] = []
         self._empty_text = ""
         self._font_scale = 1.0
         self._rotations: list[float] = []
+        self._anim_progress: float = 1.0
+        self._anim_from: list[float] = []
+        self._anim_to: list[float] = []
+        self._animation: QVariantAnimation | None = None
+        self._prev_display: list[Path] = []
 
     def set_files(self, files: list[Path]) -> None:
+        new_display = self._display_files(files) if files else []
+
+        if not self._prev_display:
+            self._files = list(files)
+            self._compute_rotations()
+            self._anim_progress = 1.0
+            self._prev_display = new_display
+            self.update()
+            return
+
         self._files = list(files)
         self._compute_rotations()
+
+        if len(new_display) >= len(self._prev_display) and files:
+            self._anim_from = []
+            self._anim_to = []
+            for i, path in enumerate(new_display):
+                try:
+                    old_idx = self._prev_display.index(path)
+                    old_rot = 0.0 if old_idx == len(self._prev_display) - 1 else self._rotations[old_idx]
+                    self._anim_from.append(old_rot)
+                except ValueError:
+                    self._anim_from.append(0.0)
+                new_rot = 0.0 if i == len(new_display) - 1 else self._rotations[i]
+                self._anim_to.append(new_rot)
+            self._anim_progress = 0.0
+            self._start_animation()
+        else:
+            self._anim_progress = 1.0
+            self.update()
+
+        self._prev_display = new_display
+
+    def _start_animation(self) -> None:
+        if self._animation is not None:
+            try:
+                self._animation.valueChanged.disconnect(self._on_animation_tick)
+            except Exception:
+                pass
+            self._animation.stop()
+            self._animation.deleteLater()
+        self._animation = QVariantAnimation(self)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(1.0)
+        self._animation.setDuration(300)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._on_animation_tick)
+        self._animation.finished.connect(self._on_animation_done)
+        self._animation.start()
+
+    def _on_animation_tick(self, value: float) -> None:
+        self._anim_progress = value
         self.update()
+
+    def _on_animation_done(self) -> None:
+        self._anim_progress = 1.0
+        self.update()
+
+    def _interpolated_rotation(self, index: int, display_len: int) -> float:
+        if self._anim_progress >= 1.0 or not self._anim_from or index >= len(self._anim_from):
+            return 0.0 if index == display_len - 1 else self._rotations[index]
+        from_rot = self._anim_from[index]
+        to_rot = self._anim_to[index]
+        return from_rot + (to_rot - from_rot) * self._anim_progress
 
     def _compute_rotations(self) -> None:
         """Pre-compute deterministic rotation angles for the stack."""
-        rng = random.Random(42)
+        rng = random.Random(self._seed)
         self._rotations = []
         for i in range(self._STACK_DEPTH):
             direction = 1 if i % 2 == 0 else -1  # alternate CW/CCW
             angle = rng.uniform(self._ROTATION_MIN_DEG, self._ROTATION_MAX_DEG)
             self._rotations.append(direction * angle)
+
+    @staticmethod
+    def _display_files(files: list[Path]) -> list[Path]:
+        blanks = files[:-1]
+        blank_count = min(len(blanks), _FileStackWidget._STACK_DEPTH)
+        blank_start = max(0, len(blanks) - blank_count)
+        return blanks[blank_start:blank_start + blank_count] + [files[-1]]
 
     def set_empty_text(self, text: str) -> None:
         self._empty_text = text
@@ -247,22 +321,18 @@ class _FileStackWidget(QWidget):
             window_size = int(config_manager.get("window_size"))
             card_size = min(window_size * 0.55, 160)
 
-            blanks = self._files[:-1]
-            blank_count = min(len(blanks), self._STACK_DEPTH)
-            blank_start = max(0, len(blanks) - blank_count)
-
             cx, cy = w / 2, h / 2
             card_x = cx - card_size / 2
             card_y = cy - card_size / 2
 
-            # Collect all cards to display from deepest to top
-            display = blanks[blank_start:blank_start + blank_count] + [self._files[-1]]
+            display = self._display_files(self._files)
 
             for i, path in enumerate(display):
                 painter.save()
                 painter.translate(cx, cy)
-                if i < len(display) - 1:
-                    painter.rotate(self._rotations[i])
+                rotation = self._interpolated_rotation(i, len(display))
+                if rotation != 0.0:
+                    painter.rotate(rotation)
                 painter.translate(-cx, -cy)
                 self._provider.draw(painter, path, card_x, card_y, card_size)
                 painter.restore()
@@ -510,7 +580,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         self._menu_btn.clicked.connect(self._show_menu)
 
         # -- File stack (cards) --
-        self._file_stack = _FileStackWidget(self._thumb_provider)
+        self._file_stack = _FileStackWidget(self._thumb_provider, seed=self._trace_id)
         self._file_stack.setObjectName("courier-file-list")
         self._file_stack.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._file_stack.set_empty_text(tr("basket.empty_hint"))
