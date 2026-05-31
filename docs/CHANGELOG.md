@@ -7,15 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-01
+
 ### Added
 
 - Portable mode: create `.portable` file next to the executable to store config
   and logs in the same directory
+- Thumbnail rotation animation when files are added or removed
+- Delete button for removing individual files from the basket
 - Thumbnails now scale to match the device pixel ratio of the display
 
 ### Changed
 
 - `FileBasket` utility class restructured for cleaner API
+- Code updated with modern Python syntax
+- Release pipeline restructured to use CHANGELOG.md as release body
+- macOS builds signed with self-signed certificate
+
+### Fixed
+
+- Caps Lock handling in global hotkey shortcut processing
 
 ## [1.1.4] - 2026-05-28
 
@@ -107,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nuitka-based packaging workflow via GitHub Actions
 - GPL-3.0 license
 
-[Unreleased]: https://github.com/ChenXu-Huang/Courier/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/ChenXu-Huang/Courier/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ChenXu-Huang/Courier/compare/v1.1.4...v1.2.0
 [1.1.4]: https://github.com/ChenXu-Huang/Courier/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/ChenXu-Huang/Courier/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/ChenXu-Huang/Courier/compare/v1.1.1...v1.1.2
