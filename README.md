@@ -19,10 +19,14 @@ Works on **Windows**, **Linux** and **macOS**. (Linux support is provided but no
 - **Drag-in to stage** — drop files into the basket to accumulate them
 - **Drag-out to transfer** — drag files out to any destination (copy or move)
 - **Shift to toggle mode** — hold Shift during drag-out to invert the configured transfer mode
+- **File thumbnails** — image and video previews, with rotation animation on add/remove
+- **Delete from basket** — remove individual files without affecting the original
 - **Compress on drag** — optionally bundle all staged files into a single zip on drag-out
 - **Multiple windows** — create as many independent baskets as you need
 - **Global hotkey** — summon a new basket window at cursor position
 - **System tray** — runs in the background with tray menu (New Window, Settings, Quit)
+- **Dark / Light theme** — follows system theme or manually select your preference
+- **Portable mode** — place a `.portable` file next to the executable to store config and logs alongside it
 - **Multi-language** — Chinese, English, or auto-detect from system locale
 - **Customizable** — window size, opacity, corner radius, transfer mode, after-drop behavior, hotkey
 
@@ -34,7 +38,7 @@ Download the latest release for your platform from the [Releases page](https://g
 
 - **Windows** — Download `Courier-<version>-win.zip`, extract, and run `Courier.exe`.
 - **macOS** — Download `Courier-<version>-macos.dmg`, install, and open `Courier.app`.
-  > **Note:** The global hotkey feature requires system permissions. On first launch (or when setting a hotkey), macOS will prompt you to grant **Input Monitoring** and **Accessibility** permissions. Go to **System Settings → Privacy & Security** and enable Courier under both categories. The app will still work as a manual drag-and-drop basket without these permissions, but the global hotkey will not function until granted.
+  > **Note:** The global hotkey feature requires system permissions. On first launch (or when setting a hotkey), macOS will prompt you to grant **Input Monitoring** permissions. Go to **System Settings → Privacy & Security** and enable Courier under both categories. The app will still work as a manual drag-and-drop basket without these permissions, but the global hotkey will not function until granted.
 - **Linux** — Download `Courier-<version>-linux.zip`, extract, and run `Courier`.
 
 ### From source
@@ -60,7 +64,7 @@ A square floating window appears on your screen. Drag any files or folders into 
 - **Drag-out**: Files are copied by default; hold **Shift** to toggle to move mode.
 - **Close**: Click the **X** button to close the window (files are not affected).
 - **New window**: Click the tray icon, select "New Window", or press the global hotkey.
-- **Global hotkey**: Press <kbd>Shift</kbd>+<kbd>Caps Lock</kbd> (Windows/Linux) or <kbd>Shift</kbd>+<kbd>Enter</kbd> (macOS) to create a new basket at your cursor position.
+- **Global hotkey**: Press `Shift` + `Caps Lock` (Windows/Linux) or `Shift` + `Enter` (macOS) to create a new basket at your cursor position.
 - **Compress**: Open the top-left menu and toggle "Compress on drag" to bundle all files into a zip.
 
 ## Configuration
@@ -69,6 +73,7 @@ Settings are available through the tray menu → **Settings**, or directly in `c
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `theme_mode` | `"auto"` | Theme: `"auto"`, `"dark"`, or `"light"` |
 | `language` | `"auto"` | Interface language: `"auto"`, `"zh_CN"`, `"en_US"` |
 | `window_size` | `240` | Window width/height in pixels |
 | `window_opacity` | `0.90` | Window opacity (0.1–1.0) |
@@ -100,9 +105,6 @@ uv run pytest
 
 # Type checking
 uv run mypy src/ tests/
-
-# Run a single test
-uv run pytest tests/test_file_basket.py::TestAdd::test_add_new_files -v
 ```
 
 ## Related
