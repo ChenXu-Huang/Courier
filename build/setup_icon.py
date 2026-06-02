@@ -21,9 +21,22 @@ from PIL import Image
 
 
 def _render_svg(svg_path: Path, size: int) -> Image.Image:
-    """将 SVG 栅格化为指定尺寸的 Pillow Image 对象。"""
-    png_data = cairosvg.svg2png(url=str(svg_path), output_width=size, output_height=size)
-    return Image.open(io.BytesIO(png_data))
+    """Rasterize SVG to Pillow Image Object of Specified Size"""
+    render_size = max(512, size)
+    png_data = cairosvg.svg2png(url=str(svg_path), output_width=render_size, output_height=render_size)
+    img = Image.open(io.BytesIO(png_data))
+
+    if render_size != size:
+        img = img.resize((size, size), resample=Image.Resampling.LANCZOS)
+
+    if img.mode == "RGBA":
+        r, g, b, a = img.split()
+        a = a.point(lambda p: min(255, max(0, int((p - 128) * 3.0 + 128))))
+        # or directly binarize the Alpha channel
+        # a = a.point(lambda p: 255 if p >= 128 else 0)
+        img = Image.merge("RGBA", (r, g, b, a))
+
+    return img
 
 
 def main() -> None:
