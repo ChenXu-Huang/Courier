@@ -51,8 +51,9 @@ import json
 import functools
 import threading
 import traceback
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional, Any, Callable, Dict, Union, Self
+from typing import Any, Self
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -71,7 +72,7 @@ def set_request_id(rid: str) -> None:
     _REQUEST_ID.set(rid)
 
 
-def get_context_ids() -> Dict[str, str]:
+def get_context_ids() -> dict[str, str]:
     """Get current context IDs, suitable for returning in HTTP response headers."""
     return {
         "X-Trace-ID": _TRACE_ID.get(),
@@ -123,7 +124,7 @@ class _PlainFormatter(logging.Formatter):
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        log_obj: Dict[str, Any] = {
+        log_obj: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
             "logger": record.name,
@@ -182,8 +183,8 @@ class LoggerConfig:
     """
 
     name: str = "app"
-    level: Union[int, str] = "INFO"
-    log_dir: Optional[Union[Path, str]] = None
+    level: int | str = "INFO"
+    log_dir: Path | str | None = None
     console: bool = True
     console_color: bool = True
     json_file: bool = True
@@ -192,9 +193,9 @@ class LoggerConfig:
     max_bytes: int = 10 * 1024 * 1024
     backup_count: int = 10
     encoding: str = "utf-8"
-    rotate_when: Optional[str] = None
-    default_extra: Optional[Dict[str, Any]] = None
-    ignored_loggers: Optional[list[str]] = None
+    rotate_when: str | None = None
+    default_extra: dict[str, Any] | None = None
+    ignored_loggers: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.log_dir is not None:
@@ -244,12 +245,12 @@ class LoggerManager:
         log.info("Order created successfully", extra={"order_id": 42})
     """
 
-    _cfg: Optional[LoggerConfig] = None
+    _cfg: LoggerConfig | None = None
     _initialized: bool = False
     _lock: threading.Lock = threading.Lock()
 
     @classmethod
-    def configure(cls, cfg: Optional[LoggerConfig] = None, **kwargs: Any) -> None:
+    def configure(cls, cfg: LoggerConfig | None = None, **kwargs: Any) -> None:
         """Initialize the logging system.
 
         Accepts a LoggerConfig instance or keyword arguments directly:
@@ -284,7 +285,7 @@ class LoggerManager:
         return logger
 
     @classmethod
-    def update_level(cls, level: Union[int, str]) -> None:
+    def update_level(cls, level: int | str) -> None:
         root = logging.getLogger()
         root.setLevel(level)
         for handler in root.handlers:
@@ -309,8 +310,8 @@ class LoggerManager:
     @classmethod
     def _build(cls, cfg: LoggerConfig) -> None:
         """Build dictConfig from LoggerConfig and apply it."""
-        handlers: Dict[str, Any] = {}
-        formatters: Dict[str, Any] = {}
+        handlers: dict[str, Any] = {}
+        formatters: dict[str, Any] = {}
 
         fmt_str = "[%(asctime)s] [%(levelname)s] [%(trace_id)s] [%(request_id)s] [%(name)s] %(message)s"
         datefmt = "%Y-%m-%d %H:%M:%S"
@@ -364,7 +365,7 @@ class LoggerManager:
                 handlers["error_file"] = cls._rotating_handler(cfg, log_dir / f"{cfg.name}.error.log", "json")
                 handlers["error_file"]["filters"] = ["error_only"]
 
-        config: Dict[str, Any] = {
+        config: dict[str, Any] = {
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": formatters,
@@ -384,7 +385,7 @@ class LoggerManager:
         logging.config.dictConfig(config)
 
     @staticmethod
-    def _rotating_handler(cfg: LoggerConfig, path: Path, formatter: str) -> Dict[str, Any]:
+    def _rotating_handler(cfg: LoggerConfig, path: Path, formatter: str) -> dict[str, Any]:
         if cfg.rotate_when:
             return {
                 "class": "logging.handlers.TimedRotatingFileHandler",
@@ -416,7 +417,7 @@ def get_logger(module_name: str) -> logging.LoggerAdapter[logging.Logger] | logg
 
 
 def log_exceptions(
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
     level: int = logging.ERROR,
     reraise: bool = True,
     default_return: Any = None,
@@ -497,7 +498,7 @@ if __name__ == "__main__":
     log.critical("CRITICAL message")
 
     @log_exceptions(level=logging.ERROR, reraise=False, default_return="fallback")
-    def risky(data: dict) -> str:
+    def risky(data: dict[str, Any]) -> str:
         raise ValueError(f"Simulated exception, data keys={list(data.keys())}")
 
     result = risky({"user_id": 1, "payload": "x" * 300})

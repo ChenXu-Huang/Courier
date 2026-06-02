@@ -1,5 +1,6 @@
 import math
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 from ..logger import get_logger
@@ -114,5 +115,5 @@ class FileBasket:
     def __bool__(self) -> bool:
         return bool(self._files)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Path]:
         return iter(self._files)

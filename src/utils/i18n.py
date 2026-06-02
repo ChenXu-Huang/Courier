@@ -1,6 +1,8 @@
 import json
 import os
 import plistlib
+from typing import Any
+
 from PySide6.QtCore import QObject, Signal, QLocale
 
 from .._meta import IS_MACOS, RESOURCES_DIR
@@ -51,7 +53,7 @@ class I18n:
     def current(self) -> str:
         return self._current
 
-    def tr(self, key: str, **kwargs) -> str:
+    def tr(self, key: str, **kwargs: Any) -> str:
         loc = self._effective(self._current)
         text = self._strings.get(loc, {}).get(key)
         if text is None:
@@ -75,7 +77,7 @@ def current_language() -> str:
     return _i18n.current
 
 
-def tr(key: str, **kwargs) -> str:
+def tr(key: str, **kwargs: Any) -> str:
     return _i18n.tr(key, **kwargs)
 
 

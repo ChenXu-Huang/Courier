@@ -3,6 +3,7 @@
 import subprocess
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QFileInfo, QSize, Qt, QPointF
 from PySide6.QtGui import QColor, QImageReader, QPainter, QPainterPath, QPixmap
@@ -16,17 +17,17 @@ logger = get_logger(__name__)
 class _LRUCache(OrderedDict):
     """A true LRU cache implemented based on OrderedDict."""
 
-    def __init__(self, maxsize: int):
+    def __init__(self, maxsize: int) -> None:
         super().__init__()
         self.maxsize = maxsize
 
-    def get_item(self, key):
+    def get_item(self, key: Any) -> Any | None:
         if key in self:
             self.move_to_end(key)
             return self[key]
         return None
 
-    def put_item(self, key, value):
+    def put_item(self, key: Any, value: Any) -> None:
         if key in self:
             self.move_to_end(key)
         self[key] = value

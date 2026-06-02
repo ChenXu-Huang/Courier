@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 __all__ = ["config_manager"]
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable, ItemsView
+from types import TracebackType
+from typing import Any
 
 from ._meta import CONFIG_DIR, IS_MACOS
 from .logger import get_logger, log_exceptions
@@ -198,7 +202,7 @@ class JsonConfigManager:
         self._ensure_loaded()
         return list(self._data.keys())
 
-    def items(self):
+    def items(self) -> ItemsView[str, Any]:
         """Iterate over ``(key, value)`` pairs (shallow)."""
         self._ensure_loaded()
         return self._data.items()
@@ -223,12 +227,12 @@ class JsonConfigManager:
         """Whether there are unsaved changes."""
         return self._dirty
 
-    def __enter__(self):
+    def __enter__(self) -> JsonConfigManager:
         self._ensure_loaded()
         self._batch += 1
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None:
         self._batch -= 1
         if exc_type is None:
             self._flush()

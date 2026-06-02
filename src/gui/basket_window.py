@@ -1,15 +1,25 @@
 """Square floating window — drag-drop file staging surface."""
 
+from __future__ import annotations
+
 import random
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QMimeData, QPoint, QRectF, QSize, Qt, QUrl, QVariantAnimation
-from PySide6.QtGui import QAction, QColor, QDrag, QFont, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtCore import (
+    QEasingCurve, QEvent, QMimeData, QPoint, QRectF, QSize,
+    Qt, QUrl, QVariantAnimation
+) # fmt: skip
+from PySide6.QtGui import (
+    QAction, QCloseEvent, QColor, QDrag, QDragEnterEvent,
+    QDragMoveEvent, QDropEvent, QEnterEvent, QFont, QMouseEvent,
+    QPaintEvent, QPainter, QPainterPath, QPen, QShowEvent,
+) # fmt: skip
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QHBoxLayout, QLabel,
-    QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget,
-    QGridLayout, QScrollArea,
+    QAbstractButton, QApplication, QGridLayout, QHBoxLayout,
+    QLabel, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )  # fmt: skip
 
 from ..config import config_manager
@@ -25,13 +35,13 @@ logger = get_logger(__name__)
 class _ThumbnailWidget(QWidget):
     """Renders the system file icon as thumbnail."""
 
-    def __init__(self, path: Path, card_size: int, provider: ThumbnailProvider, parent=None):
+    def __init__(self, path: Path, card_size: int, provider: ThumbnailProvider, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._path = path
         self._provider = provider
         self.setFixedSize(card_size, card_size)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -49,9 +59,9 @@ class _FileGridItem(QWidget):
         font_scale: float,
         card_size: int,
         provider: ThumbnailProvider,
-        on_close=None,
-        parent=None
-    ):
+        on_close: Callable[[Path], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._path = path
         self.setFixedWidth(card_size)
@@ -111,9 +121,9 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
         card_size: int,
         radius: int,
         provider: ThumbnailProvider,
-        on_file_remove=None,
-        parent=None,
-    ):
+        on_file_remove: Callable[[Path], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._radius = radius
         self.setWindowFlags(
@@ -173,12 +183,12 @@ class _FileGridWindow(QWidget, PlatformCompatMixin):
         self.setFixedSize(win_w, win_h)
         self.setStyleSheet(theme_manager.window_stylesheet())
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         """Re-apply platform-specific window hacks after the native window is created."""
         super().showEvent(event)
         self.apply_platform_hacks()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -307,7 +317,7 @@ class _FileStackWidget(QWidget):
     def set_font_scale(self, scale: float) -> None:
         self._font_scale = scale
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -352,7 +362,7 @@ class _FileStackWidget(QWidget):
 class _TopMenu(QMenu, PlatformCompatMixin):
     """QMenu subclass that enforces macOS topmost behavior."""
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.apply_platform_hacks()
 
@@ -364,14 +374,14 @@ class _PillButton(QAbstractButton):
     _RIGHT_MARGIN = 8
     _TEXT_LEFT = 16
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._hovered = False
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -417,12 +427,12 @@ class _PillButton(QAbstractButton):
         finally:
             painter.end()
 
-    def enterEvent(self, event) -> None:
+    def enterEvent(self, event: QEnterEvent) -> None:
         self._hovered = True
         self.update()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    def leaveEvent(self, event: QEvent) -> None:
         self._hovered = False
         self.update()
         super().leaveEvent(event)
@@ -447,6 +457,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         self._basket = FileBasket()
         self._drag_start_pos: QPoint | None = None
         self._drag_out_started = False
+        self._self_drop = False
         self._temp_zip: Path | None = None
         self._expanded = False
         self._grid_window: _FileGridWindow | None = None
@@ -619,7 +630,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         self._title_close_btn.raise_()
         self._menu_btn.raise_()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -642,19 +653,20 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
     # Drag-in (accept files from external)
     # ------------------------------------------------------------------
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.apply_platform_hacks()
 
-    def dragEnterEvent(self, event) -> None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dragMoveEvent(self, event) -> None:
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._self_drop = True
         set_trace_id(self._trace_id)
         paths: list[Path] = []
         for url in event.mimeData().urls():
@@ -747,7 +759,20 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
         mime = QMimeData()
         mime.setUrls(urls)
         drag.setMimeData(mime)
+
+        self._self_drop = False
         result = drag.exec(action)
+
+        if self._self_drop:
+            # User dropped back on the basket — cancel the operation
+            if compress and self._temp_zip is not None:
+                self._basket.remove(self._temp_zip)
+                cleanup_temp_zip(self._temp_zip)
+            if stale_files:
+                names = "\n".join(p.name for p in stale_files[:5])
+                QMessageBox.warning(self, tr("app.name"), tr("basket.files_missing", names=names))
+            self._update_display()
+            return
 
         if compress:
             cleanup_temp_zip(self._temp_zip)
@@ -911,7 +936,7 @@ class CourierBasketWindow(QWidget, PlatformCompatMixin):
 
         self.setStyleSheet(theme_manager.window_stylesheet())
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         if self._grid_window:
             self._grid_window.close()
         self._thumb_provider.clear_cache()
