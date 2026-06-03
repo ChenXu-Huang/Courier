@@ -8,19 +8,43 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test on ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ["3.13"]
+        os: ["ubuntu-latest", "windows-latest", "macos-latest"]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Install Qt dependencies (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libegl1 \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-xfixes0
+
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: 3.13
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -29,4 +53,9 @@ jobs:
         run: uv run mypy src/ tests/
 
       - name: Run pytest
-        run: xvfb-run uv run pytest
+        run: |
+          if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+            xvfb-run --auto-servernum uv run pytest
+          else
+            uv run pytest
+          fi

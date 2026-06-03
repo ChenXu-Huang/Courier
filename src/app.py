@@ -1,6 +1,8 @@
 """Application lifecycle manager — entry point for the GUI."""
 
 import sys
+from PySide6.QtGui import QCursor, QIcon
+from PySide6.QtWidgets import QApplication
 
 from ._meta import APP_NAME, VERSION, ROOT_DIR, LOG_DIR, RESOURCES_DIR
 from .logger import LoggerManager, LoggerConfig
@@ -22,15 +24,12 @@ _LOG_CONFIG = LoggerConfig(
 LoggerManager.configure(_LOG_CONFIG)
 logger = LoggerManager.get(__name__)
 
+from .config import config_manager
+from .gui import CourierTrayManager
+from .utils import CourierHotkeyManager
+
 
 def launch_gui() -> int:
-    from PySide6.QtGui import QCursor, QIcon
-    from PySide6.QtWidgets import QApplication
-
-    from .config import config_manager
-    from .gui import CourierTrayManager
-    from .utils import CourierHotkeyManager
-
     logger.info("Courier starting | version=%s | root=%s", VERSION, ROOT_DIR)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
